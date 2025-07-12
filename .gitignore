@@ -1,41 +1,43 @@
-# Prerequisites
-*.d
+# ESP-IDF & Build System
+# -------------------------------------------------------------------
+# Build output directory
+/build/
 
-# Compiled Object files
-*.slo
-*.lo
+# Generated configuration files.
+# It's recommended to track a sdkconfig.defaults file instead.
+/sdkconfig
+/sdkconfig.old
+
+# Directory for components managed by the build system
+/managed_components/
+
+# Object files, libraries, and binaries that might be created outside the build dir
+*.a
+*.bin
+*.elf
+*.map
 *.o
 *.obj
 
-# Precompiled Headers
-*.gch
-*.pch
+# Python virtual environment
+# -------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
 
-# Linker files
-*.ilk
+# IDE & Editor specific files
+# -------------------------------------------------------------------
+# VSCode user-specific settings
+.vscode/
 
-# Debugger Files
-*.pdb
+# Clangd cache
+.clangd/
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# System files
+# -------------------------------------------------------------------
+# macOS
+.DS_Store
 
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
+# Windows
+Thumbs.db
