@@ -269,9 +269,9 @@ private:
     ErrorHandler(const ErrorHandler&) = delete;
     ErrorHandler& operator=(const ErrorHandler&) = delete;
     
-    // Load error descriptions from JSON file
-    bool loadErrorDescriptions();
-    
+    void lookupError(ErrorCode code, String& name, String& desc, ErrorSeverity& sev) const;
+    static ErrorSeverity defaultSeverityFromCode(uint16_t codeNum);
+
     // Member variables
     bool _initialized;                              ///< Initialization flag
     ErrorEntry _errorHistory[MAX_ERROR_HISTORY];    ///< Error history buffer
@@ -279,9 +279,7 @@ private:
     size_t _errorCount;                             ///< Total errors logged
     ErrorCode _lastError;                           ///< Last error code
     ErrorCallback _errorCallback;                   ///< Error callback function
-    mutable JsonDocument _errorDescriptions;        ///< Loaded error descriptions (mutable for const access)
-
-    // Rate limiting for serial output
+    bool _errorsFilePresent;                        ///< /errors.json exists (no RAM cache)
     static const unsigned long PRINT_INTERVAL_MS = 10000;
     ErrorCode _lastPrintedCode;
     unsigned long _lastPrintTime;

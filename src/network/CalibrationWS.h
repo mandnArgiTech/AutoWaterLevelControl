@@ -54,7 +54,10 @@ public:
      * @return true if successful
      */
     bool begin();
-    
+
+    void stopForOTA();
+    void resumeAfterOTA();
+
     /**
      * @brief Process WebSocket events (call in loop)
      */
@@ -94,12 +97,10 @@ private:
     void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
     
     // Handle incoming commands
-    void handleCommand(uint8_t num, const String& payload);
+    void handleCommand(uint8_t num, const uint8_t* payload, size_t length);
     
     // Send JSON to client
     void sendToClient(uint8_t num, const String& json);
-    
-    // Send JSON to all clients
     void broadcastJson(const String& json);
     
     // Generate reading JSON
@@ -115,6 +116,7 @@ private:
     uint8_t _clientCount;               ///< Connected clients
     unsigned long _lastBroadcast;       ///< Last broadcast time
     bool _initialized;                  ///< Init flag
+    bool _suspendedForOTA;              ///< Stopped for OTA / web upload
     
     // Static instance for callback
     static CalibrationWebSocket* _instance;

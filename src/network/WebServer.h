@@ -70,6 +70,12 @@ public:
      * @return true if running
      */
     bool isRunning() const { return _running; }
+
+    /** Stop HTTP server to free RAM before ArduinoOTA. */
+    void stopForOTA();
+
+    /** Restart HTTP server after failed ArduinoOTA. */
+    void resumeAfterOTA();
     
     /**
      * @brief Get request count
@@ -116,7 +122,10 @@ private:
     void handleApiRestart();
     void handleApiReset();
     void handleApiInfo();
-    
+
+    void handleFirmwareUpload();
+    void handleFirmwareUploadComplete();
+
     // Helper methods
     void sendJson(int code, const String& json);
     void sendError(int code, const String& message);
@@ -130,6 +139,7 @@ private:
     TankCalculator& _calculator;    ///< Calculator reference
     bool _running;                  ///< Server running flag
     uint32_t _requestCount;         ///< Request counter
+    bool _firmwareUploadOk;         ///< Last web OTA result
 };
 
 #endif // WEB_SERVER_H

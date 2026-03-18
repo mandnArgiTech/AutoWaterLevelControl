@@ -44,6 +44,10 @@ public:
     void loop();
     ErrorCode connect();
     void disconnect();
+    /** Disconnect and shrink buffer before ArduinoOTA (free heap). */
+    void prepareForOTA();
+    /** Restore MQTT buffer after failed OTA; loop() will reconnect. */
+    void restoreAfterOTA();
     bool isConnected();
     bool isEnabled() const;
     MQTTState getState() const { return _state; }

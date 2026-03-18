@@ -28,16 +28,17 @@ ErrorHandler& ErrorHandler::getInstance() {
 /**
  * @brief Private constructor - initializes member variables
  */
-ErrorHandler::ErrorHandler() 
+ErrorHandler::ErrorHandler()
     : _initialized(false)
     , _errorIndex(0)
     , _errorCount(0)
     , _lastError(ErrorCode::ERR_NONE)
     , _errorCallback(nullptr)
+    , _errorsFilePresent(false)
     , _lastPrintedCode(ErrorCode::ERR_NONE)
     , _lastPrintTime(0)
     , _suppressedCount(0) {
-    
+
     for (size_t i = 0; i < MAX_ERROR_HISTORY; i++) {
         _errorHistory[i].code = ErrorCode::ERR_NONE;
         _errorHistory[i].severity = ErrorSeverity::INFO;
@@ -55,92 +56,63 @@ ErrorHandler::ErrorHandler()
  * @return true if initialization successful
  */
 bool ErrorHandler::begin() {
-    // Step 1: Load error descriptions from JSON file
-    if (!loadErrorDescriptions()) {
-        Serial.println(F("[ErrorHandler] Warning: Could not load error descriptions"));
-        // Continue anyway - will use default descriptions
+    _errorsFilePresent = LittleFS.exists("/errors.json");
+    if (_errorsFilePresent) {
+        Serial.println(F("[ErrorHandler] errors.json present (lazy lookup, no RAM cache)"));
+    } else {
+        Serial.println(F("[ErrorHandler] Warning: errors.json not found"));
     }
-    
-    // Step 2: Mark as initialized
     _initialized = true;
-    
-    Serial.println(F("[ErrorHandler] Initialized successfully"));
     return true;
 }
 
-// =============================================================================
-// SECTION 4: LOAD ERROR DESCRIPTIONS
-// =============================================================================
+ErrorSeverity ErrorHandler::defaultSeverityFromCode(uint16_t codeNum) {
+    if (codeNum >= 500) return ErrorSeverity::ERROR;
+    if (codeNum >= 300) return ErrorSeverity::WARNING;
+    return ErrorSeverity::INFO;
+}
 
-/**
- * @brief Load error descriptions from JSON file in LittleFS
- * @return true if loaded successfully
- */
-bool ErrorHandler::loadErrorDescriptions() {
-    // Step 1: Check if LittleFS is mounted
-    FSInfo fs_info;
-    if (!LittleFS.info(fs_info)) {
-        Serial.println(F("[ErrorHandler] LittleFS not mounted!"));
-        return false;
+void ErrorHandler::lookupError(ErrorCode code, String& name, String& desc, ErrorSeverity& sev) const {
+    uint16_t cn = static_cast<uint16_t>(code);
+    name = "E" + String(cn);
+    desc = "Error " + String(cn) + " - No description available";
+    sev = defaultSeverityFromCode(cn);
+
+    if (!_errorsFilePresent || !LittleFS.exists("/errors.json")) return;
+
+    char key[8];
+    snprintf(key, sizeof(key), "%u", (unsigned)cn);
+
+    File f = LittleFS.open("/errors.json", "r");
+    if (!f) return;
+
+    JsonDocument filter;
+    filter["errors"][key] = true;
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, f, DeserializationOption::Filter(filter));
+    f.close();
+    if (err) return;
+
+    JsonObjectConst entry = doc["errors"][key];
+    if (entry.isNull()) return;
+
+    if (!entry["name"].isNull()) {
+        const char* n = entry["name"];
+        if (n) name = n;
     }
-    Serial.printf("[ErrorHandler] LittleFS: %u bytes used of %u\n", 
-                  (unsigned)fs_info.usedBytes, (unsigned)fs_info.totalBytes);
-    
-    // Step 2: Check if file exists
-    if (!LittleFS.exists("/errors.json")) {
-        Serial.println(F("[ErrorHandler] errors.json not found in LittleFS"));
-        // List files to debug
-        Dir dir = LittleFS.openDir("/");
-        Serial.println(F("[ErrorHandler] Files in LittleFS:"));
-        while (dir.next()) {
-            Serial.printf("  - %s (%u bytes)\n", dir.fileName().c_str(), (unsigned)dir.fileSize());
+    if (!entry["description"].isNull()) {
+        const char* d = entry["description"];
+        if (d) desc = d;
+    }
+    if (!entry["severity"].isNull()) {
+        const char* s = entry["severity"];
+        if (s) {
+            if (strcmp(s, "critical") == 0) sev = ErrorSeverity::CRITICAL;
+            else if (strcmp(s, "error") == 0) sev = ErrorSeverity::ERROR;
+            else if (strcmp(s, "warning") == 0) sev = ErrorSeverity::WARNING;
+            else sev = ErrorSeverity::INFO;
         }
-        return false;
     }
-    
-    // Step 3: Open the file
-    File file = LittleFS.open("/errors.json", "r");
-    if (!file) {
-        Serial.println(F("[ErrorHandler] Failed to open errors.json"));
-        return false;
-    }
-    
-    Serial.printf("[ErrorHandler] errors.json size: %u bytes\n", (unsigned)file.size());
-    
-    // Step 4: Parse JSON
-    DeserializationError error = deserializeJson(_errorDescriptions, file);
-    file.close();
-    
-    if (error) {
-        Serial.print(F("[ErrorHandler] JSON parse error: "));
-        Serial.println(error.c_str());
-        return false;
-    }
-    
-    // Step 5: Verify structure
-    if (!_errorDescriptions["errors"].is<JsonObject>()) {
-        Serial.println(F("[ErrorHandler] Invalid JSON structure - 'errors' not found"));
-        return false;
-    }
-    
-    // Count loaded errors
-    JsonObject errors = _errorDescriptions["errors"].as<JsonObject>();
-    int count = 0;
-    for (JsonPair p : errors) {
-        (void)p;
-        count++;
-    }
-    Serial.printf("[ErrorHandler] Loaded %d error definitions\n", count);
-    
-    // Verify we can read a sample entry
-    if (errors["101"].is<JsonObject>()) {
-        String desc = errors["101"]["description"].as<String>();
-        Serial.printf("[ErrorHandler] Test lookup E101: %s\n", desc.c_str());
-    } else {
-        Serial.println(F("[ErrorHandler] WARNING: Cannot access error 101!"));
-    }
-    
-    return true;
 }
 
 // =============================================================================
@@ -162,10 +134,9 @@ ErrorCode ErrorHandler::logError(ErrorCode code, const String& additionalInfo) {
         return code;
     }
     
-    // Step 3: Get error details
-    ErrorSeverity severity = getErrorSeverity(code);
-    String name = getErrorName(code);
-    String description = getErrorDescription(code);
+    String name, description;
+    ErrorSeverity severity;
+    lookupError(code, name, description, severity);
     
     // Step 4: Create error entry
     ErrorEntry& entry = _errorHistory[_errorIndex];
@@ -276,69 +247,24 @@ size_t ErrorHandler::getErrorCount() const {
  * @return Error description string
  */
 String ErrorHandler::getErrorDescription(ErrorCode code) const {
-    // Step 1: Try to get from loaded JSON
-    String codeStr = String(static_cast<uint16_t>(code));
-    
-    // Direct path access for ArduinoJson v7
-    JsonVariantConst entry = _errorDescriptions["errors"][codeStr];
-    if (!entry.isNull() && entry.is<JsonObjectConst>()) {
-        JsonVariantConst desc = entry["description"];
-        if (!desc.isNull()) {
-            return desc.as<String>();
-        }
-    }
-    
-    // Step 2: Return default if not found
-    return "Error " + codeStr + " - No description available";
+    String name, desc;
+    ErrorSeverity sev;
+    lookupError(code, name, desc, sev);
+    return desc;
 }
 
-/**
- * @brief Get error name from code
- * @param code Error code
- * @return Error name string
- */
 String ErrorHandler::getErrorName(ErrorCode code) const {
-    String codeStr = String(static_cast<uint16_t>(code));
-    
-    // Direct path access for ArduinoJson v7
-    JsonVariantConst entry = _errorDescriptions["errors"][codeStr];
-    if (!entry.isNull() && entry.is<JsonObjectConst>()) {
-        JsonVariantConst name = entry["name"];
-        if (!name.isNull()) {
-            return name.as<String>();
-        }
-    }
-    
-    return "E" + codeStr;
+    String name, desc;
+    ErrorSeverity sev;
+    lookupError(code, name, desc, sev);
+    return name;
 }
 
-/**
- * @brief Get severity level for error code
- * @param code Error code
- * @return Severity level
- */
 ErrorSeverity ErrorHandler::getErrorSeverity(ErrorCode code) const {
-    String codeStr = String(static_cast<uint16_t>(code));
-    
-    // Direct path access for ArduinoJson v7
-    JsonVariantConst entry = _errorDescriptions["errors"][codeStr];
-    if (!entry.isNull() && entry.is<JsonObjectConst>()) {
-        JsonVariantConst sev = entry["severity"];
-        if (!sev.isNull()) {
-            String severity = sev.as<String>();
-            
-            if (severity == "critical") return ErrorSeverity::CRITICAL;
-            if (severity == "error") return ErrorSeverity::ERROR;
-            if (severity == "warning") return ErrorSeverity::WARNING;
-            return ErrorSeverity::INFO;
-        }
-    }
-    
-    // Default based on error code range
-    uint16_t codeNum = static_cast<uint16_t>(code);
-    if (codeNum >= 500) return ErrorSeverity::ERROR;
-    if (codeNum >= 300) return ErrorSeverity::WARNING;
-    return ErrorSeverity::INFO;
+    String name, desc;
+    ErrorSeverity sev;
+    lookupError(code, name, desc, sev);
+    return sev;
 }
 
 /**

@@ -79,6 +79,12 @@ Note: Set jumper on US-100 for Serial Mode (UART)
    pio run --target uploadfs
    ```
 
+### Firmware updates (OTA)
+
+- **Web UI**: Open **Firmware** tab, select `.pio/build/nodemcuv2/firmware.bin`, upload. MQTT and WebSocket pause during upload to free RAM.
+- **ArduinoOTA** (IDE / `pio run -t upload --upload-port IP`): Before transfer, the device disconnects MQTT, stops WebSocket and HTTP server, then prints free heap on serial.
+- **Memory**: Error descriptions load from LittleFS on demand (no large JSON in RAM). WiFi scan returns at most 10 networks. `index.html` is gzip-compressed on build for smaller flash use.
+
 5. **Monitor serial output**:
    ```bash
    pio device monitor

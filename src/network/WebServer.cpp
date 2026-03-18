@@ -11,6 +11,10 @@
 #include "../network/MQTTManager.h"
 #include "../utils/TimeManager.h"
 #include "../version.h"
+#include <Updater.h>
+
+extern void fluidPrepareForOTA();
+extern void fluidRestoreAfterOTA();
 
 // =============================================================================
 // SECTION 1: CONSTRUCTOR
@@ -26,7 +30,8 @@ WebServerManager::WebServerManager(ISensor& sensor, TankCalculator& calculator)
     , _sensor(sensor)
     , _calculator(calculator)
     , _running(false)
-    , _requestCount(0) {
+    , _requestCount(0)
+    , _firmwareUploadOk(false) {
 }
 
 // =============================================================================
@@ -97,7 +102,13 @@ void WebServerManager::setupRoutes() {
     // Step 8: API - System endpoints
     _server.on("/api/restart", HTTP_POST, std::bind(&WebServerManager::handleApiRestart, this));
     _server.on("/api/reset", HTTP_POST, std::bind(&WebServerManager::handleApiReset, this));
-    
+
+    _server.on(
+        "/api/update",
+        HTTP_POST,
+        [this]() { handleFirmwareUploadComplete(); },
+        [this]() { handleFirmwareUpload(); });
+
     // Step 9: CORS preflight handler
     _server.on("/api/config", HTTP_OPTIONS, [this]() {
         addCorsHeaders();
@@ -117,6 +128,62 @@ void WebServerManager::setupRoutes() {
  */
 void WebServerManager::loop() {
     _server.handleClient();
+}
+
+void WebServerManager::stopForOTA() {
+    if (!_running) return;
+    _server.close();
+    _running = false;
+    Serial.println(F("[WebServer] Stopped for OTA"));
+}
+
+void WebServerManager::resumeAfterOTA() {
+    if (_running) return;
+    _server.begin();
+    _running = true;
+    Serial.println(F("[WebServer] Resumed after OTA"));
+}
+
+void WebServerManager::handleFirmwareUpload() {
+    HTTPUpload& upload = _server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        _firmwareUploadOk = false;
+        fluidPrepareForOTA();
+        Serial.printf("[WebOTA] %s\n", upload.filename.c_str());
+        uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+        if (!Update.begin(maxSpace)) {
+            Update.printError(Serial);
+        } else {
+            Serial.printf("[WebOTA] Free heap: %u\n", (unsigned)ESP.getFreeHeap());
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+            Update.printError(Serial);
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) {
+            _firmwareUploadOk = true;
+            Serial.printf("[WebOTA] Done %u bytes — rebooting\n", (unsigned)upload.totalSize);
+        } else {
+            Update.printError(Serial);
+        }
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        Update.end(false);
+        fluidRestoreAfterOTA();
+    }
+}
+
+void WebServerManager::handleFirmwareUploadComplete() {
+    _requestCount++;
+    addCorsHeaders();
+    if (_firmwareUploadOk) {
+        _server.send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting\"}");
+        delay(50);
+        ESP.restart();
+    } else {
+        fluidRestoreAfterOTA();
+        _server.send(500, "application/json", "{\"success\":false,\"message\":\"Firmware update failed\"}");
+    }
 }
 
 // =============================================================================
@@ -223,6 +290,8 @@ void WebServerManager::handleApiStatus() {
     doc["firmware"] = Version::getFirmware();
     doc["uptime"] = TimeManager::getInstance().getUptimeString();
     doc["freeHeap"] = ESP.getFreeHeap();
+    doc["heapFragmentation"] = ESP.getHeapFragmentation();
+    doc["maxFreeBlock"] = ESP.getMaxFreeBlockSize();
     doc["timestamp"] = TimeManager::getInstance().getISO8601();
     
     // Sensor status

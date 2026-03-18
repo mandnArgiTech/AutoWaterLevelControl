@@ -51,6 +51,8 @@ enum class WifiMgrState {
  * @brief Callback for WiFi state changes
  */
 typedef std::function<void(WifiMgrState state)> WiFiCallback;
+typedef std::function<void()> OTAPrepareCallback;
+typedef std::function<void()> OTAErrorCallback;
 
 // =============================================================================
 // SECTION 3: CONSTANTS
@@ -195,6 +197,12 @@ public:
      * @param callback Function to call on state change
      */
     void setStateCallback(WiFiCallback callback);
+
+    /** Called before ArduinoOTA starts — free heap (MQTT, WS, web). */
+    void setOTAPrepareCallback(OTAPrepareCallback cb) { _otaPrepareCallback = cb; }
+
+    /** Called on ArduinoOTA error — restore services if OTA aborted. */
+    void setOTAErrorCallback(OTAErrorCallback cb) { _otaErrorCallback = cb; }
     
     /**
      * @brief Get WiFi status as JSON
@@ -242,6 +250,8 @@ private:
     bool _initialized;              ///< Initialization flag
     WifiMgrState _state;            ///< Current state
     WiFiCallback _stateCallback;    ///< State change callback
+    OTAPrepareCallback _otaPrepareCallback;
+    OTAErrorCallback _otaErrorCallback;
     unsigned long _lastConnectAttempt;  ///< Last connection attempt time
     unsigned long _reconnectInterval;   ///< Reconnection interval
     uint8_t _reconnectCount;        ///< Reconnection attempt count

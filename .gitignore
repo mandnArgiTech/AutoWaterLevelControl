@@ -29,3 +29,6 @@ __pycache__/
 
 # Logs
 *.log
+
+# Generated from index.html (rebuilt by gzip_www.py)
+data/index.html.gz

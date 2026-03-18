@@ -60,6 +60,16 @@ void printStatus();
 void handleWiFiStateChange(WifiMgrState state);
 void handleMQTTMessage(const String& topic, const String& payload);
 
+void fluidPrepareForOTA() {
+    MQTTManager::getInstance().prepareForOTA();
+    if (calibrationWS) calibrationWS->stopForOTA();
+}
+
+void fluidRestoreAfterOTA() {
+    if (calibrationWS) calibrationWS->resumeAfterOTA();
+    MQTTManager::getInstance().restoreAfterOTA();
+}
+
 // =============================================================================
 // setup()
 // =============================================================================
@@ -167,6 +177,15 @@ void initializeSystem() {
     Serial.println(F("\n>>> Calibration WebSocket..."));
     calibrationWS = new CalibrationWebSocket(*activeSensor, *calculator);
     if (calibrationWS) calibrationWS->begin();
+
+    WiFiManager::getInstance().setOTAPrepareCallback([]() {
+        fluidPrepareForOTA();
+        if (webServer) webServer->stopForOTA();
+    });
+    WiFiManager::getInstance().setOTAErrorCallback([]() {
+        if (webServer) webServer->resumeAfterOTA();
+        fluidRestoreAfterOTA();
+    });
 
     // --- Initial reading ---
     Serial.println(F("\n>>> Initial sensor reading..."));

@@ -24,8 +24,9 @@ CalibrationWebSocket::CalibrationWebSocket(ISensor& sensor, TankCalculator& calc
     , _calculator(calculator)
     , _clientCount(0)
     , _lastBroadcast(0)
-    , _initialized(false) {
-    
+    , _initialized(false)
+    , _suspendedForOTA(false) {
+
     _instance = this;
 }
 
@@ -59,8 +60,24 @@ bool CalibrationWebSocket::begin() {
 /**
  * @brief Process WebSocket events
  */
+void CalibrationWebSocket::stopForOTA() {
+    if (!_initialized || _suspendedForOTA) return;
+    _wsServer.close();
+    _suspendedForOTA = true;
+    _clientCount = 0;
+    Serial.println(F("[CalibrationWS] Stopped for OTA"));
+}
+
+void CalibrationWebSocket::resumeAfterOTA() {
+    if (!_suspendedForOTA) return;
+    _wsServer.begin();
+    _wsServer.onEvent(webSocketEventCallback);
+    _suspendedForOTA = false;
+    Serial.println(F("[CalibrationWS] Resumed"));
+}
+
 void CalibrationWebSocket::loop() {
-    if (!_initialized) return;
+    if (!_initialized || _suspendedForOTA) return;
     
     // Step 1: Process WebSocket
     _wsServer.loop();
@@ -110,10 +127,7 @@ void CalibrationWebSocket::onWebSocketEvent(uint8_t num, WStype_t type,
             break;
             
         case WStype_TEXT:
-            {
-                String message = String((char*)payload);
-                handleCommand(num, message);
-            }
+            handleCommand(num, payload, length);
             break;
             
         default:
@@ -128,9 +142,9 @@ void CalibrationWebSocket::onWebSocketEvent(uint8_t num, WStype_t type,
 /**
  * @brief Handle incoming commands from client
  */
-void CalibrationWebSocket::handleCommand(uint8_t num, const String& payload) {
+void CalibrationWebSocket::handleCommand(uint8_t num, const uint8_t* payload, size_t length) {
     JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, payload);
+    DeserializationError error = deserializeJson(doc, payload, length);
     
     if (error) {
         Serial.println(F("[CalibrationWS] JSON parse error"));
@@ -163,14 +177,15 @@ void CalibrationWebSocket::handleCommand(uint8_t num, const String& payload) {
         
         ErrorCode result = ConfigManager::getInstance().saveConfig();
         
+        char buf[96];
         JsonDocument response;
         response["type"] = "saveResult";
         response["success"] = (result == ErrorCode::ERR_NONE);
         response["offsetCm"] = sensorConfig.offsetMm / 10.0f;
-        
-        String json;
-        serializeJson(response, json);
-        sendToClient(num, json);
+        size_t n = serializeJson(response, buf, sizeof(buf));
+        if (n > 0 && n < sizeof(buf)) {
+            _wsServer.sendTXT(num, (uint8_t*)buf, n);
+        }
         
         Serial.printf("[CalibrationWS] Calibration saved: %.1f cm\n", sensorConfig.offsetMm / 10.0f);
         
@@ -289,15 +304,12 @@ String CalibrationWebSocket::getStatusJson() {
  * @brief Send JSON to specific client
  */
 void CalibrationWebSocket::sendToClient(uint8_t num, const String& json) {
-    String payload = json;  // Make non-const copy for WebSocket library
-    _wsServer.sendTXT(num, payload);
+    if (json.length() == 0) return;
+    _wsServer.sendTXT(num, json.c_str(), json.length());
 }
 
-/**
- * @brief Send JSON to all connected clients
- */
 void CalibrationWebSocket::broadcastJson(const String& json) {
-    String payload = json;  // Make non-const copy for WebSocket library
-    _wsServer.broadcastTXT(payload);
+    if (json.length() == 0) return;
+    _wsServer.broadcastTXT(json.c_str(), json.length());
 }
 

@@ -33,6 +33,8 @@ WiFiManager::WiFiManager()
     : _initialized(false)
     , _state(WifiMgrState::DISCONNECTED)
     , _stateCallback(nullptr)
+    , _otaPrepareCallback(nullptr)
+    , _otaErrorCallback(nullptr)
     , _lastConnectAttempt(0)
     , _reconnectInterval(30000)  // 30 seconds
     , _reconnectCount(0)
@@ -273,8 +275,12 @@ void WiFiManager::setupOTA() {
     // Step 3: OTA callbacks
     ArduinoOTA.onStart([this]() {
         _otaInProgress = true;
-        String type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
-        Serial.println("[OTA] Start updating " + type);
+        const char* type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
+        Serial.printf("[OTA] Start updating %s — freeing heap...\n", type);
+        if (_otaPrepareCallback) {
+            _otaPrepareCallback();
+        }
+        Serial.printf("[OTA] Free heap before transfer: %u bytes\n", (unsigned)ESP.getFreeHeap());
     });
     
     ArduinoOTA.onEnd([this]() {
@@ -300,6 +306,9 @@ void WiFiManager::setupOTA() {
             case OTA_CONNECT_ERROR: Serial.println(F("Connect Failed")); break;
             case OTA_RECEIVE_ERROR: Serial.println(F("Receive Failed")); break;
             case OTA_END_ERROR:     Serial.println(F("End Failed")); break;
+        }
+        if (_otaErrorCallback) {
+            _otaErrorCallback();
         }
     });
     
@@ -504,11 +513,13 @@ String WiFiManager::scanNetworks() {
     Serial.println(F("[WiFiManager] Scanning networks..."));
     
     int numNetworks = WiFi.scanNetworks();
-    
+    const int maxNet = 10;
+    int n = (numNetworks > maxNet) ? maxNet : numNetworks;
+
     JsonDocument doc;
     JsonArray networks = doc["networks"].to<JsonArray>();
-    
-    for (int i = 0; i < numNetworks; i++) {
+
+    for (int i = 0; i < n; i++) {
         JsonObject network = networks.add<JsonObject>();
         network["ssid"] = WiFi.SSID(i);
         network["rssi"] = WiFi.RSSI(i);
@@ -516,7 +527,8 @@ String WiFiManager::scanNetworks() {
         network["channel"] = WiFi.channel(i);
     }
     
-    doc["count"] = numNetworks;
+    doc["count"] = n;
+    doc["totalScanned"] = numNetworks;
     
     WiFi.scanDelete();  // Free memory
     

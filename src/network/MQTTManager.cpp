@@ -171,6 +171,19 @@ void MQTTManager::disconnect() {
     Serial.println(F("[MQTTManager] Disconnected"));
 }
 
+void MQTTManager::prepareForOTA() {
+    if (_state == MQTTState::DISABLED) return;
+    disconnect();
+    _mqttClient.setBufferSize(128);
+    Serial.println(F("[MQTTManager] Prepared for OTA (MQTT disconnected, small buffer)"));
+}
+
+void MQTTManager::restoreAfterOTA() {
+    if (_state == MQTTState::DISABLED) return;
+    _mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
+    Serial.println(F("[MQTTManager] Restored after OTA abort"));
+}
+
 bool MQTTManager::isConnected() {
     return _mqttClient.connected();
 }

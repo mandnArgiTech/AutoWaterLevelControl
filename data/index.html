@@ -262,6 +262,7 @@
             <button class="tab" data-panel="tank">Tank</button>
             <button class="tab" data-panel="sensor">Sensor</button>
             <button class="tab" data-panel="system">System</button>
+            <button class="tab" data-panel="firmware">Firmware</button>
         </nav>
 
         <!-- Calibration Panel -->
@@ -423,6 +424,31 @@
             </div>
         </section>
 
+        <!-- Firmware OTA Panel -->
+        <section class="config-panel" id="panel-firmware">
+            <div class="panel-header"><h2 class="panel-title">Firmware Update</h2></div>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
+                Upload a <code>.bin</code> from PlatformIO: <code>pio run</code> then use
+                <code>.pio/build/nodemcuv2/firmware.bin</code>. Device reboots on success.
+                Keep WiFi stable during upload (~30–60s).
+            </p>
+            <div class="form-group">
+                <label>Current firmware</label>
+                <div id="fw-current" style="font-family:var(--font-mono);color:var(--accent-cyan);">—</div>
+            </div>
+            <div class="form-group">
+                <label>Firmware file (.bin)</label>
+                <input type="file" id="fw-file" accept=".bin,application/octet-stream">
+            </div>
+            <div style="background:var(--bg-card);border-radius:8px;height:8px;overflow:hidden;margin:1rem 0;border:1px solid var(--border-color);">
+                <div id="fw-progress" style="height:100%;width:0%;background:var(--accent-blue);transition:width 0.2s;"></div>
+            </div>
+            <div id="fw-status" style="font-size:0.875rem;color:var(--text-secondary);"></div>
+            <div class="btn-group">
+                <button class="btn btn-primary" id="fw-upload-btn" onclick="uploadFirmware()">Upload &amp; install</button>
+            </div>
+        </section>
+
         <!-- System Panel -->
         <section class="config-panel" id="panel-system">
             <div class="panel-header"><h2 class="panel-title">System</h2></div>
@@ -465,6 +491,48 @@
                 else loadSectionData(tab.dataset.panel);
             });
         });
+
+        function uploadFirmware() {
+            const input = document.getElementById('fw-file');
+            const bar = document.getElementById('fw-progress');
+            const st = document.getElementById('fw-status');
+            const btn = document.getElementById('fw-upload-btn');
+            if (!input.files || !input.files[0]) {
+                showToast('Select a .bin file', 'error');
+                return;
+            }
+            const file = input.files[0];
+            btn.disabled = true;
+            bar.style.width = '0%';
+            st.textContent = 'Uploading…';
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/update');
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    bar.style.width = Math.round(100 * e.loaded / e.total) + '%';
+                }
+            };
+            xhr.onload = () => {
+                btn.disabled = false;
+                if (xhr.status === 200) {
+                    st.textContent = 'Success — rebooting…';
+                    showToast('Firmware installed. Reconnect in ~10s.', 'success');
+                    bar.style.width = '100%';
+                } else {
+                    st.textContent = xhr.responseText || 'Update failed';
+                    showToast('Firmware update failed', 'error');
+                    bar.style.width = '0%';
+                }
+            };
+            xhr.onerror = () => {
+                btn.disabled = false;
+                st.textContent = 'Network error';
+                showToast('Upload failed', 'error');
+            };
+            const fd = new FormData();
+            fd.append('firmware', file, file.name || 'firmware.bin');
+            xhr.send(fd);
+        }
 
         // Offset slider sync
         document.getElementById('offset-slider').addEventListener('input', (e) => {
@@ -598,6 +666,16 @@
                         document.getElementById('system-timezone').value = data.timezoneOffset || 19800;
                         document.getElementById('system-debug').checked = data.debugEnabled;
                         break;
+                    case 'firmware':
+                        break;
+                }
+                if (section === 'firmware') {
+                    try {
+                        const r = await fetch(API_BASE + '/info');
+                        const info = await r.json();
+                        document.getElementById('fw-current').textContent =
+                            (info.firmware || '') + '  build ' + (info.build || '');
+                    } catch (e) { document.getElementById('fw-current').textContent = '?'; }
                 }
             } catch (e) { console.error(e); }
         }
