@@ -3,6 +3,7 @@
  * @brief REST API handlers for WebServerManager
  */
 #include "WebServer.h"
+#include "../motor/IMotorController.h"
 #include "WiFiManager.h"
 #include "MQTTManager.h"
 #include "../utils/TimeManager.h"
@@ -245,19 +246,26 @@ void WebServerManager::handleApiReset() {
 }
 
 // =============================================================================
-// PUMP API  — Phase 2 (RelayManager)
+// PUMP API — IMotorController (motor_relay / motor_sms builds only)
 // =============================================================================
-#include "../relay/RelayManager.h"
 
 void WebServerManager::handleApiPumpGet() {
     _requestCount++;
     addCorsHeaders();
-    sendJson(200, RelayManager::getInstance().getStatusJson());
+    if (!_motor) {
+        sendApiFailure(503, "NO_MOTOR", "Pump control not available on this firmware role");
+        return;
+    }
+    sendJson(200, _motor->getStatusJson());
 }
 
 void WebServerManager::handleApiPumpPost() {
     _requestCount++;
     addCorsHeaders();
+    if (!_motor) {
+        sendApiFailure(503, "NO_MOTOR", "Pump control not available on this firmware role");
+        return;
+    }
 
     if (!_server.hasArg("plain")) {
         sendApiFailure(400, "NO_BODY", "No body provided");
@@ -276,6 +284,6 @@ void WebServerManager::handleApiPumpPost() {
         return;
     }
 
-    RelayManager::getInstance().setMode(RelayManager::modeFromString(state));
+    _motor->setMode(IMotorController::modeFromString(state));
     sendSuccess("Pump mode set to " + state);
 }

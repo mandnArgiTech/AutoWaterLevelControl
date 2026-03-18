@@ -6,7 +6,8 @@
 #include "../utils/Log.h"
 
 WebServerManager::WebServerManager(ISensor& sensor, TankCalculator& calculator,
-                                   FlmOtaPrepareFn otaPrepare, FlmOtaRestoreFn otaRestore)
+                                   FlmOtaPrepareFn otaPrepare, FlmOtaRestoreFn otaRestore,
+                                   IMotorController* motor)
     : _server(ConfigManager::getInstance().getSystemConfig().webPort)
     , _sensor(sensor)
     , _calculator(calculator)
@@ -14,7 +15,8 @@ WebServerManager::WebServerManager(ISensor& sensor, TankCalculator& calculator,
     , _requestCount(0)
     , _firmwareUploadOk(false)
     , _otaPrepare(otaPrepare)
-    , _otaRestore(otaRestore) {
+    , _otaRestore(otaRestore)
+    , _motor(motor) {
 }
 
 ErrorCode WebServerManager::begin() {
@@ -46,6 +48,8 @@ void WebServerManager::setupRoutes() {
     _server.on("/api/config/sensor", HTTP_POST, [this]() { handleApiConfigSectionPost(); });
     _server.on("/api/config/system", HTTP_GET, [this]() { handleApiConfigSectionGet(); });
     _server.on("/api/config/system", HTTP_POST, [this]() { handleApiConfigSectionPost(); });
+    _server.on("/api/config/relay", HTTP_GET, [this]() { handleApiConfigSectionGet(); });
+    _server.on("/api/config/relay", HTTP_POST, [this]() { handleApiConfigSectionPost(); });
 
     _server.on("/api/wifi/status", HTTP_GET, std::bind(&WebServerManager::handleApiWiFiStatus, this));
     _server.on("/api/wifi/scan", HTTP_GET, std::bind(&WebServerManager::handleApiWiFiScan, this));
@@ -60,10 +64,13 @@ void WebServerManager::setupRoutes() {
     _server.on("/api/restart", HTTP_POST, std::bind(&WebServerManager::handleApiRestart, this));
     _server.on("/api/reset",   HTTP_POST, std::bind(&WebServerManager::handleApiReset, this));
 
-    // Phase 2 — Pump relay control
-    _server.on("/api/pump", HTTP_GET,  std::bind(&WebServerManager::handleApiPumpGet,  this));
-    _server.on("/api/pump", HTTP_POST, std::bind(&WebServerManager::handleApiPumpPost, this));
-    _server.on("/api/pump", HTTP_OPTIONS, [this]() { addCorsHeaders(); _server.send(204); });
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+    if (_motor) {
+        _server.on("/api/pump", HTTP_GET,  std::bind(&WebServerManager::handleApiPumpGet,  this));
+        _server.on("/api/pump", HTTP_POST, std::bind(&WebServerManager::handleApiPumpPost, this));
+        _server.on("/api/pump", HTTP_OPTIONS, [this]() { addCorsHeaders(); _server.send(204); });
+    }
+#endif
 
     _server.on(
         "/api/update",

@@ -22,6 +22,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "../utils/ErrorHandler.h"
+#include "../motor/IMotorController.h"
 
 // =============================================================================
 // SECTION 1: CONFIGURATION FILE PATHS
@@ -96,6 +97,18 @@
 #define DEFAULT_NTP_SERVER          "pool.ntp.org"
 #define DEFAULT_WEB_PORT            80
 #define DEFAULT_DEBUG_ENABLED       true
+
+// Motor / relay / SMS (motor_* firmware; ignored on sensor_only)
+#define DEFAULT_RELAY_ENABLED           false
+#define DEFAULT_RELAY_PIN               12       ///< D6 — avoid GPIO14 (common XKC signal pin)
+#define DEFAULT_RELAY_ACTIVE_LOW        true
+#define DEFAULT_RELAY_PUMP_ON_PCT       20.0f
+#define DEFAULT_RELAY_PUMP_OFF_PCT      85.0f
+#define DEFAULT_RELAY_MAX_RUN_MIN       30
+#define DEFAULT_GSM_RX_PIN              5        ///< D1
+#define DEFAULT_GSM_TX_PIN              4        ///< D2
+#define DEFAULT_GSM_BAUD                9600
+#define DEFAULT_SMS_CONFIRM_MS          30000u
 
 // =============================================================================
 // SECTION 3: CONFIGURATION STRUCTURES
@@ -284,6 +297,8 @@ public:
     const TankConfig& getTankConfig() const { return _tankConfig; }
     const SensorConfig& getSensorConfig() const { return _sensorConfig; }
     const SystemConfig& getSystemConfig() const { return _systemConfig; }
+    MotorConfig& getMotorConfig() { return _motorConfig; }
+    const MotorConfig& getMotorConfig() const { return _motorConfig; }
     
     /**
      * @brief Get entire configuration as JSON string
@@ -300,7 +315,7 @@ public:
     
     /**
      * @brief Update specific section from JSON
-     * @param section Section name ("wifi", "mqtt", "tank", "sensor", "system")
+     * @param section Section name ("wifi", "mqtt", "tank", "sensor", "system", "relay")
      * @param json JSON string for that section
      * @return ErrorCode indicating success or failure
      */
@@ -349,6 +364,7 @@ private:
     void setDefaultTankConfig();
     void setDefaultSensorConfig();
     void setDefaultSystemConfig();
+    void setDefaultMotorConfig();
     
     // Parse JSON sections
     void parseWiFiConfig(const JsonObject& obj);
@@ -356,6 +372,7 @@ private:
     void parseTankConfig(const JsonObject& obj);
     void parseSensorConfig(const JsonObject& obj);
     void parseSystemConfig(const JsonObject& obj);
+    void parseMotorConfig(const JsonObject& obj);
     
     // Serialize to JSON
     void serializeWiFiConfig(JsonObject& obj) const;
@@ -363,6 +380,7 @@ private:
     void serializeTankConfig(JsonObject& obj) const;
     void serializeSensorConfig(JsonObject& obj) const;
     void serializeSystemConfig(JsonObject& obj) const;
+    void serializeMotorConfig(JsonObject& obj) const;
 
     ErrorCode saveConfigAtomic();
     void applyNumericClamps();
@@ -376,6 +394,7 @@ private:
     TankConfig _tankConfig;     ///< Tank configuration
     SensorConfig _sensorConfig; ///< Sensor configuration
     SystemConfig _systemConfig; ///< System configuration
+    MotorConfig  _motorConfig;   ///< Relay + SMS motor section (`relay` in JSON)
 
     volatile bool _configWriteLocked;  ///< Serialize HTTP full config POST vs other saves
 };

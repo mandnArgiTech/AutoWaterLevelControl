@@ -1,22 +1,6 @@
 /**
  * @file SmsMotorController.h
  * @brief SMS-based motor controller via SIM800L/A6 GSM shield
- *
- * Used for Taro Smart Panel at Sangareddy farm (5HP motor).
- * Compiled when: -D FLM_ROLE_MOTOR_SMS
- *
- * The Taro Smart Panel accepts specific SMS messages to control the motor.
- * Both the ON and OFF message strings are fully configurable via config.json
- * and the app (MotorSmsConfigScreen), because different Taro panels may use
- * different command strings.
- *
- * Sequence:
- *   commandOn()  → send onMessage  SMS to targetPhone
- *   commandOff() → send offMessage SMS to targetPhone
- *   State = PENDING until GSM responds OK (or timeout → STOPPED + alert)
- *
- * @author FluidLevelMonitor Project
- * @version 2.0.0
  */
 #ifndef SMS_MOTOR_CONTROLLER_H
 #define SMS_MOTOR_CONTROLLER_H
@@ -26,9 +10,8 @@
 #include <ArduinoJson.h>
 #include "../utils/Log.h"
 
-#define GSM_RESPONSE_TIMEOUT_MS  15000    ///< AT command response timeout
-#define GSM_SEND_RETRIES         2        ///< Retry count on SMS send failure
-#define GSM_INTER_RETRY_MS       5000     ///< Delay between retries
+#define GSM_INIT_RETRY_MS       30000u
+#define GSM_OFF_RETRY_MS        45000u   ///< Re-try OFF SMS while motor still physically on
 
 class SmsMotorController : public IMotorController {
 public:
@@ -46,30 +29,52 @@ public:
     String     getMQTTJson()     const override;
     String     getControlType()  const override { return "sms"; }
 
-    /** Last SMS send result for status reporting */
     bool lastSmsSent() const { return _lastSmsSent; }
     String lastSmsError() const { return _lastSmsError; }
 
 private:
-    bool sendSms(const String& message);
-    bool waitForResponse(const String& expected, uint32_t timeoutMs);
+    enum class SmsPhase : uint8_t {
+        Idle,
+        WaitPrompt,
+        WaitCmgs,
+        RetryWait
+    };
+    enum class SmsJob : uint8_t { None, On, Off };
+
     void flushGsm();
-    bool initGsm();
+    bool initGsmBlocking();
+    void tryGsmInit();
+    void pollSmsFsm();
+    void startSmsJob(SmsJob job, const String& body);
+    void onSmsSuccess();
+    void onSmsFailure();
     void commandOn();
     void commandOff();
     bool checkDryRun(float pct);
     void checkMaxRuntime();
+    bool bufferHas(const String& buf, const char* needle) const;
 
-    MotorConfig    _config       = {};
-    MotorMode      _mode         = MotorMode::OFF;
-    MotorState     _state        = MotorState::STOPPED;
-    bool           _initialized  = false;
+    MotorConfig    _config        = {};
+    MotorMode      _mode          = MotorMode::OFF;
+    MotorState     _state         = MotorState::STOPPED;
+    bool           _initialized   = false;
+    bool           _gsmOk         = false;
+    unsigned long  _nextGsmInitMs = 0;
     bool           _dryRunBlocked = false;
-    bool           _lastSmsSent  = false;
+    bool           _lastSmsSent   = false;
     String         _lastSmsError;
-    unsigned long  _startedAt    = 0;
-    unsigned long  _pendingSince = 0;
-    float          _lastPct      = 0;
-    SoftwareSerial* _gsm         = nullptr;
+    unsigned long  _startedAt     = 0;
+    unsigned long  _pendingSince  = 0;
+    float          _lastPct       = 0;
+    SoftwareSerial* _gsm          = nullptr;
+
+    SmsJob         _smsJob        = SmsJob::None;
+    SmsPhase       _smsPhase      = SmsPhase::Idle;
+    uint8_t        _smsAttempt    = 0;
+    String         _smsBody;
+    unsigned long  _smsDeadline   = 0;
+    String         _rxLine;
+    unsigned long  _nextOffRetryMs = 0;
+    bool           _pendingOffRetry  = false;
 };
 #endif

@@ -57,5 +57,22 @@
     "ntpServer": "pool.ntp.org",
     "webPort": 80,
     "debugEnabled": false
+  },
+  "relay": {
+    "enabled": false,
+    "pin": 12,
+    "activeLow": true,
+    "pumpOnPercent": 20.0,
+    "pumpOffPercent": 85.0,
+    "maxRunMinutes": 30,
+    "confirmTimeoutMs": 30000,
+    "gsm": {
+      "rxPin": 5,
+      "txPin": 4,
+      "baudRate": 9600,
+      "targetPhone": "",
+      "onMessage": "",
+      "offMessage": ""
+    }
   }
 }

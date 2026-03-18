@@ -1,6 +1,6 @@
 # FluidLevelMonitor × SudarshanChakra — Consolidated Integration Plan
 
-> Replaces the earlier FEATURE_PLAN.md. This is the authoritative plan.
+> Authoritative plan. Code review + security checklist from the former FEATURE_PLAN.md are in **§11 Appendix**.
 > Last updated: 2026-03
 
 ---
@@ -96,34 +96,31 @@ build_flags =
 
 ### Per-role what gets compiled
 
+`build_src_filter` excludes `RelayMotorController.cpp` on **motor_sms**, `SmsMotorController.cpp` on **motor_relay**, and both on **sensor_only**.
+
 | Module | `sensor_only` | `motor_relay` | `motor_sms` |
 |--------|:---:|:---:|:---:|
-| Sensor pipeline (ISensor, FilteredSensorBase, TankCalculator) | ✅ | ❌ | ❌ |
-| 3-stage filter (Median→MovingAvg→Kalman) | ✅ | ❌ | ❌ |
-| WebSocket calibration | ✅ | ❌ | ❌ |
-| RelayManager | ❌ | ✅ | ❌ |
-| SmsMotorManager | ❌ | ❌ | ✅ |
+| Sensor + TankCalculator + calibration WS | ✅ | ✅ | ✅ |
+| `IMotorController` + factory | ❌ | ✅ | ✅ |
+| `RelayMotorController` | ❌ | ✅ | ❌ |
+| `SmsMotorController` | ❌ | ❌ | ✅ |
 | WiFiManager + MQTT | ✅ | ✅ | ✅ |
-| ConfigManager + LittleFS | ✅ | ✅ | ✅ |
-| Web server / REST API | ✅ | ✅ | ✅ |
+| ConfigManager (`relay` section) | ✅ | ✅ | ✅ |
+| `/api/pump`, pump MQTT | ❌ | ✅ | ✅ |
 | OTA | ✅ | ✅ | ✅ |
 
 ### How roles communicate
 
 ```
-[sensor_only ESP8266]                    [motor_relay / motor_sms ESP8266]
-tank1_abc/water/level  ─────────────►  {deviceTag}/motor/command
-tank1_abc/water/status ─────────────►  { "command": "pump_on" | "pump_off" | "pump_auto" }
-                                                │
-                                         Subscribed to
-                                         this topic from VPS
+[sensor_only]  publishes …/water/level     [motor_*]  subscribes …/motor/command
+[motor_*]      publishes …/motor/status   (after pump_on/off/auto command)
 ```
 
-The motor controller does NOT read its own sensor. It receives MQTT commands from the cloud, which receives level data from the sensor module. The cloud decides when to command the pump based on thresholds configured per-tank.
+**Cloud-first AUTO:** the motor node can also run AUTO from **local** tank level when a sensor is present; SudarshanChakra may still command via `{topicPrefix}/{deviceTag}/motor/command`.
 
 ---
 
-## 4. New Firmware Module: SmsMotorManager
+## 4. Firmware Module: SmsMotorController
 
 ### Purpose
 
@@ -140,16 +137,15 @@ Sends SMS messages to the Taro Smart Panel to turn the 5HP farm motor ON or OFF.
 ```json
 "relay": {
   "enabled": true,
-  "controlType": "sms",
   "gsm": {
-    "rxPin": 4,
-    "txPin": 5,
+    "rxPin": 5,
+    "txPin": 4,
     "baudRate": 9600,
     "targetPhone": "+91XXXXXXXXXX",
     "onMessage": "START PUMP",
-    "offMessage": "STOP PUMP",
-    "confirmationTimeoutMs": 30000
+    "offMessage": "STOP PUMP"
   },
+  "confirmTimeoutMs": 30000,
   "pumpOnPercent": 20.0,
   "pumpOffPercent": 85.0,
   "maxRunMinutes": 60
@@ -337,53 +333,13 @@ User taps "Start Pump"
 
 ## 8. Revised Firmware Roadmap
 
-### Phase 1 — Sensor stability (DONE in current branch)
-- [x] ISensor interface + FilteredSensorBase
-- [x] 3-stage filter pipeline
-- [x] ConfigManager + LittleFS
-- [x] WiFi + MQTT + OTA
-- [x] REST API + Web UI
-- [x] Bug fixes: yield(), watchdog, MQTT backoff
+### Phase 1 — Sensor stability ✅
+- [x] ISensor + filters + ConfigManager + WiFi/MQTT/OTA + REST
 
-### Phase 2 — Firmware role split (NEXT)
-
-**New files needed:**
-
-```
-src/
-  motor/
-    IMotorController.h        — Interface: begin(), commandOn(), commandOff(), getStatusJson()
-    RelayMotorController.h/cpp — GPIO relay implementation (was RelayManager)
-    SmsMotorController.h/cpp   — SIM800L/A6 SMS implementation (Taro Smart Panel)
-    MotorControllerFactory.h/cpp — creates correct impl from config
-  main_sensor.cpp             — setup()/loop() for FLM_ROLE_SENSOR
-  main_motor.cpp              — setup()/loop() for FLM_ROLE_MOTOR_*
-```
-
-Rename current `RelayManager` → `RelayMotorController` implementing `IMotorController`.
-
-**platformio.ini** gets 3 environments as described in Section 3.
-
-**Config additions for SMS:**
-
-```json
-"relay": {
-  "enabled": true,
-  "controlType": "relay",     // or "sms"
-  "pin": 12,                  // relay only
-  "activeLow": true,          // relay only
-  "gsm": {                    // sms only
-    "rxPin": 4,
-    "txPin": 5,
-    "targetPhone": "+91XXXXXXXXXX",
-    "onMessage": "START PUMP",
-    "offMessage": "STOP PUMP"
-  },
-  "pumpOnPercent": 20.0,
-  "pumpOffPercent": 85.0,
-  "maxRunMinutes": 60
-}
-```
+### Phase 2 — Role split + IMotorController ✅
+- [x] `RelayManager` removed; `RelayMotorController` + `SmsMotorController` + factory
+- [x] `FLM_ROLE_*` guards, `src_filter`, `/api/config/relay`, non-blocking SMS FSM, GSM retry, relay safety fixes
+- [x] MQTT `motor/command` + `motor/status`
 
 ### Phase 3 — SudarshanChakra integration
 
@@ -403,21 +359,14 @@ Rename current `RelayManager` → `RelayMotorController` implementing `IMotorCon
 
 ## 9. What to Delete / Not Build
 
-The standalone `AutoWaterLevelControl/android/` directory we built is the wrong approach. It should be **discarded** and the water screens built inside `SudarshanChakra/android/` instead.
-
-The `RelayManager` we built is the right logic but needs to be refactored as `RelayMotorController` implementing `IMotorController`, so the SMS variant can be added cleanly.
+Standalone FluidLevelMonitor **android/** scaffold — **discarded**; water UI belongs in **SudarshanChakra** Android.
 
 ---
 
 ## 10. Immediate Next Actions
 
-### Firmware (AutoWaterLevelControl branch)
-1. Refactor `RelayManager` → `IMotorController` + `RelayMotorController`
-2. Create `SmsMotorController` (SIM800L AT commands for SMS)
-3. Create `MotorControllerFactory`
-4. Split `main.cpp` into role-based compile variants
-5. Add `controlType` and `gsm` fields to `RelayConfig` / ConfigManager
-6. Update platformio.ini with 3 environments
+### Firmware
+- Builds: `pio run -e sensor_only` | `motor_relay` | `motor_sms`
 
 ### Backend (SudarshanChakra)
 1. Implement Tasks 1–8 from WATER_LEVEL_INTEGRATION_PLAN.md (already specced)
@@ -433,4 +382,27 @@ The `RelayManager` we built is the right logic but needs to be refactored as `Re
 4. Build `WaterTanksScreen`, `WaterTankDetailScreen`, `MotorControlScreen`, `MotorSmsConfigScreen`
 5. Add water strip card to `AlertFeedScreen`
 6. Wire into existing `NavGraph.kt`
+
+---
+
+## 11. Appendix (from former FEATURE_PLAN.md)
+
+### Code review summary
+
+| # | Severity | Issue | Notes |
+|---|----------|-------|------|
+| 1 | CRITICAL | Real credentials in repo | Sanitize `data/config.json`; use `.gitignore` / example |
+| 2 | HIGH | Blocking `delay()` in sensor averaging | `yield()` in sample loops |
+| 3 | MEDIUM | Config write lock conflict | Optional `_savePending` queue |
+| 4 | MEDIUM | WDT | ESP8266 ~3.2s HW WDT; feed every loop |
+| 5 | LOW | MQTT backoff | Capped at 30s for motor use |
+| 6–8 | LOW | Timestamps, errors FS, web OTA guard | As in original table |
+
+### Security checklist
+
+- [ ] No real credentials in committed `config.json`
+- [ ] Random AP password on first boot (optional)
+- [ ] Optional HTTP basic auth for REST
+- [ ] Document trusted-LAN requirement
+- [ ] TLS for MQTT where applicable
 

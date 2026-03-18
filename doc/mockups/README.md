@@ -12,3 +12,5 @@ Open in any modern browser. Includes four interactive screens:
 
 The mockup is pixel-accurate to the planned Compose UI and can be used
 for stakeholder reviews before Android development begins.
+
+**SudarshanChakra (SC) app:** treat this mockup as a **design reference** for future SC Android water/motor screens (dashboard, pump, sensor, settings), not a shipped SC binary.

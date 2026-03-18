@@ -66,7 +66,9 @@ Full replace. Body: JSON with optional sections `wifi`, `mqtt`, `tank`, `sensor`
 
 ### GET/POST /api/config/{section}
 
-`section` ∈ `wifi` | `mqtt` | `tank` | `sensor` | `system`. POST body is JSON for that section only. Same error schema as above.
+`section` ∈ `wifi` | `mqtt` | `tank` | `sensor` | `system` | **`relay`**. POST body is JSON for that section only. Same error schema as above.
+
+**`relay`** — pump/motor: `enabled`, `pin`, `activeLow`, `pumpOnPercent`, `pumpOffPercent`, `maxRunMinutes`, `confirmTimeoutMs` (SMS), nested **`gsm`**: `rxPin`, `txPin`, `baudRate`, `targetPhone`, `onMessage`, `offMessage`. Used by **motor_relay** / **motor_sms** firmware (`pio run -e motor_relay` / `motor_sms`).
 
 ---
 
@@ -111,7 +113,7 @@ Topic root: `{topicPrefix}/{deviceTag}/...` (see config). Typical subtopics:
 - `.../status` — LWT / online JSON
 - `.../command` — subscribe; payload JSON `command`: `read` | `status` | `restart`
 
-Reconnect uses exponential backoff from 5s up to **120s** between attempts.
+Reconnect uses exponential backoff from 5s up to **30s** between attempts (`MQTT_RECONNECT_MAX_MS`).
 
 ---
 
@@ -136,57 +138,40 @@ Connect to `ws://<ip>:81/`. Text JSON commands (max **512** bytes per message):
 
 ---
 
-## REST — Pump Control (Phase 2 — RelayManager)
+## REST — Pump Control (motor_relay / motor_sms only)
+
+**Not available** on **sensor_only** builds (`503 NO_MOTOR` if routed).
 
 ### GET /api/pump
 
-Returns current relay/pump state.
-
-```json
-{
-  "enabled": true,
-  "mode": "auto",
-  "state": "stopped",
-  "runSeconds": 0,
-  "autoEnabled": true,
-  "dryRunBlocked": false,
-  "levelPercent": 42.5,
-  "pin": 14,
-  "thresholds": {
-    "onPercent": 20.0,
-    "offPercent": 85.0,
-    "maxRunMinutes": 30,
-    "dryRunGuardPct": 5.0
-  }
-}
-```
+Relay: `controlType` `relay`, `pin`, thresholds. SMS: `controlType` `sms`, `gsmOk`, `lastSmsError`, etc.
 
 ### POST /api/pump
 
-Set operating mode.
-
 **Body:** `{ "state": "on" | "off" | "auto" }`
 
-**Responses:** `200 { "success": true }` · `400 MISSING_STATE` · `400 PARSE_ERROR`
+**Responses:** `200` · `400` · `503 NO_MOTOR`
 
-**Safety:** Dry-run guard (< 5% filled) and max-runtime cutoff (30 min) are always enforced, regardless of mode.
+**Safety:** Dry-run guard (&lt; 5% filled when level known), max-runtime cutoff, SMS OFF failure keeps logical RUNNING + retry.
 
 ---
 
-## MQTT — Pump (Phase 2)
+## MQTT — Motor (motor_* firmware)
 
 | Topic | Direction | Payload |
 |-------|-----------|---------|
-| `{deviceTag}/water/pump` | Device → App | `{ "state": "running"\|"stopped", "mode": "auto"\|"on"\|"off", "runSeconds": N, "blocked": false }` |
-| `{deviceTag}/water/command` | App → Device | `{ "command": "pump_on"\|"pump_off"\|"pump_auto" }` |
+| `{topicPrefix}/{deviceTag}/motor/status` | Device → broker | After command: JSON from `getMQTTJson()` (`controlType`, `state`, `mode`, `runSeconds`, …) |
+| `{topicPrefix}/{deviceTag}/motor/command` | Broker → device | `{ "command": "pump_on" \| "pump_off" \| "pump_auto" }` |
+
+Sensor/command topic `{...}/command` remains used for `read`, `status`, `restart` on all roles.
 
 ---
 
-## Bug fixes applied (this sprint)
+## Bug fixes applied (reference)
 
 | Issue | Fix |
 |-------|-----|
 | `delay()` in `readDistanceAverageMm` blocks WS frames | Added `yield()` before each inter-sample delay |
-| MQTT reconnect backoff cap was 120s | Reduced to 30s (`MQTT_RECONNECT_MAX_MS`) |
-| No watchdog timer | Added `ESP.wdtEnable(8000)` at init + `ESP.wdtFeed()` in loop |
+| MQTT reconnect backoff | Capped at **30s** (`MQTT_RECONNECT_MAX_MS`) for pump use |
+| Watchdog | **`ESP.wdtFeed()`** each loop; ESP8266 HW WDT ~3.2s (Arduino `wdtEnable(ms)` not applied as a custom interval) |
 | Real credentials in `data/config.json` | Sanitized; MQTT disabled by default |

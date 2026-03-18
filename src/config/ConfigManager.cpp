@@ -115,6 +115,7 @@ void ConfigManager::resetToDefaults() {
     setDefaultTankConfig();
     setDefaultSensorConfig();
     setDefaultSystemConfig();
+    setDefaultMotorConfig();
     
     FLM_LOG_INFO("Cfg", "reset to defaults");
 }
@@ -188,6 +189,22 @@ void ConfigManager::setDefaultSystemConfig() {
     _systemConfig.debugEnabled = DEFAULT_DEBUG_ENABLED;
 }
 
+void ConfigManager::setDefaultMotorConfig() {
+    _motorConfig.enabled         = DEFAULT_RELAY_ENABLED;
+    _motorConfig.pumpOnPercent   = DEFAULT_RELAY_PUMP_ON_PCT;
+    _motorConfig.pumpOffPercent  = DEFAULT_RELAY_PUMP_OFF_PCT;
+    _motorConfig.maxRunMinutes   = DEFAULT_RELAY_MAX_RUN_MIN;
+    _motorConfig.pin             = DEFAULT_RELAY_PIN;
+    _motorConfig.activeLow       = DEFAULT_RELAY_ACTIVE_LOW;
+    _motorConfig.gsmRxPin        = DEFAULT_GSM_RX_PIN;
+    _motorConfig.gsmTxPin        = DEFAULT_GSM_TX_PIN;
+    _motorConfig.gsmBaudRate     = DEFAULT_GSM_BAUD;
+    _motorConfig.targetPhone     = "";
+    _motorConfig.onMessage       = "";
+    _motorConfig.offMessage      = "";
+    _motorConfig.confirmTimeoutMs = DEFAULT_SMS_CONFIRM_MS;
+}
+
 // =============================================================================
 // SECTION 5: LOAD CONFIGURATION
 // =============================================================================
@@ -258,6 +275,9 @@ ErrorCode ConfigManager::loadConfig() {
     if (doc["system"].is<JsonObject>()) {
         parseSystemConfig(doc["system"]);
     }
+    if (doc["relay"].is<JsonObject>()) {
+        parseMotorConfig(doc["relay"]);
+    }
     
     FLM_LOG_INFO("Cfg", "loaded");
     return ErrorCode::ERR_NONE;
@@ -311,6 +331,8 @@ ErrorCode ConfigManager::saveConfigAtomic() {
     serializeSensorConfig(jo);
     jo = doc["system"].to<JsonObject>();
     serializeSystemConfig(jo);
+    jo = doc["relay"].to<JsonObject>();
+    serializeMotorConfig(jo);
 
     LittleFS.remove(CONFIG_TEMP_FILE);
     File file = LittleFS.open(CONFIG_TEMP_FILE, "w");
@@ -441,6 +463,15 @@ void ConfigManager::applyNumericClamps() {
     if (_sensorConfig.kalmanMeasureNoise < 1e-6f) _sensorConfig.kalmanMeasureNoise = 1e-6f;
     if (_sensorConfig.minDistance < 1.f) _sensorConfig.minDistance = 1.f;
     if (_sensorConfig.maxDistance > 10000.f) _sensorConfig.maxDistance = 10000.f;
+    if (_motorConfig.pumpOnPercent < 0.f) _motorConfig.pumpOnPercent = 0.f;
+    if (_motorConfig.pumpOnPercent > 100.f) _motorConfig.pumpOnPercent = 100.f;
+    if (_motorConfig.pumpOffPercent < 0.f) _motorConfig.pumpOffPercent = 0.f;
+    if (_motorConfig.pumpOffPercent > 100.f) _motorConfig.pumpOffPercent = 100.f;
+    if (_motorConfig.maxRunMinutes < 1) _motorConfig.maxRunMinutes = 1;
+    if (_motorConfig.maxRunMinutes > MOTOR_MAX_RUN_MINUTES)
+        _motorConfig.maxRunMinutes = MOTOR_MAX_RUN_MINUTES;
+    if (_motorConfig.confirmTimeoutMs < 5000u) _motorConfig.confirmTimeoutMs = 5000u;
+    if (_motorConfig.confirmTimeoutMs > 120000u) _motorConfig.confirmTimeoutMs = 120000u;
 }
 
 ErrorCode ConfigManager::validateConfig() {
@@ -566,6 +597,32 @@ void ConfigManager::parseSystemConfig(const JsonObject& obj) {
     _systemConfig.debugEnabled = obj["debugEnabled"] | DEFAULT_DEBUG_ENABLED;
 }
 
+void ConfigManager::parseMotorConfig(const JsonObject& obj) {
+    _motorConfig.enabled = obj["enabled"] | DEFAULT_RELAY_ENABLED;
+    _motorConfig.pin = obj["pin"] | DEFAULT_RELAY_PIN;
+    _motorConfig.activeLow = obj["activeLow"] | DEFAULT_RELAY_ACTIVE_LOW;
+    _motorConfig.pumpOnPercent = obj["pumpOnPercent"] | DEFAULT_RELAY_PUMP_ON_PCT;
+    _motorConfig.pumpOffPercent = obj["pumpOffPercent"] | DEFAULT_RELAY_PUMP_OFF_PCT;
+    _motorConfig.maxRunMinutes = obj["maxRunMinutes"] | DEFAULT_RELAY_MAX_RUN_MIN;
+    if (obj["gsm"].is<JsonObject>()) {
+        JsonObject g = obj["gsm"];
+        _motorConfig.gsmRxPin = g["rxPin"] | DEFAULT_GSM_RX_PIN;
+        _motorConfig.gsmTxPin = g["txPin"] | DEFAULT_GSM_TX_PIN;
+        _motorConfig.gsmBaudRate = g["baudRate"] | DEFAULT_GSM_BAUD;
+        _motorConfig.targetPhone = g["targetPhone"] | "";
+        _motorConfig.onMessage = g["onMessage"] | "";
+        _motorConfig.offMessage = g["offMessage"] | "";
+    } else {
+        _motorConfig.gsmRxPin = obj["gsmRxPin"] | DEFAULT_GSM_RX_PIN;
+        _motorConfig.gsmTxPin = obj["gsmTxPin"] | DEFAULT_GSM_TX_PIN;
+        _motorConfig.gsmBaudRate = obj["gsmBaudRate"] | DEFAULT_GSM_BAUD;
+        _motorConfig.targetPhone = obj["targetPhone"] | "";
+        _motorConfig.onMessage = obj["onMessage"] | "";
+        _motorConfig.offMessage = obj["offMessage"] | "";
+    }
+    _motorConfig.confirmTimeoutMs = obj["confirmTimeoutMs"] | DEFAULT_SMS_CONFIRM_MS;
+}
+
 // =============================================================================
 // SECTION 10: JSON SERIALIZATION HELPERS
 // =============================================================================
@@ -640,6 +697,23 @@ void ConfigManager::serializeSystemConfig(JsonObject& obj) const {
     obj["debugEnabled"] = _systemConfig.debugEnabled;
 }
 
+void ConfigManager::serializeMotorConfig(JsonObject& obj) const {
+    obj["enabled"] = _motorConfig.enabled;
+    obj["pin"] = _motorConfig.pin;
+    obj["activeLow"] = _motorConfig.activeLow;
+    obj["pumpOnPercent"] = _motorConfig.pumpOnPercent;
+    obj["pumpOffPercent"] = _motorConfig.pumpOffPercent;
+    obj["maxRunMinutes"] = _motorConfig.maxRunMinutes;
+    obj["confirmTimeoutMs"] = _motorConfig.confirmTimeoutMs;
+    JsonObject g = obj["gsm"].to<JsonObject>();
+    g["rxPin"] = _motorConfig.gsmRxPin;
+    g["txPin"] = _motorConfig.gsmTxPin;
+    g["baudRate"] = _motorConfig.gsmBaudRate;
+    g["targetPhone"] = _motorConfig.targetPhone;
+    g["onMessage"] = _motorConfig.onMessage;
+    g["offMessage"] = _motorConfig.offMessage;
+}
+
 // =============================================================================
 // SECTION 11: JSON ACCESSORS
 // =============================================================================
@@ -665,6 +739,9 @@ String ConfigManager::getConfigJson() const {
     
     JsonObject systemObj = doc["system"].to<JsonObject>();
     serializeSystemConfig(systemObj);
+    
+    JsonObject relayObj = doc["relay"].to<JsonObject>();
+    serializeMotorConfig(relayObj);
     
     String output;
     serializeJson(doc, output);
@@ -703,6 +780,9 @@ ErrorCode ConfigManager::setConfigFromJson(const String& json) {
     if (doc["system"].is<JsonObject>()) {
         parseSystemConfig(doc["system"]);
     }
+    if (doc["relay"].is<JsonObject>()) {
+        parseMotorConfig(doc["relay"]);
+    }
     
     return validateConfig();
 }
@@ -734,6 +814,8 @@ ErrorCode ConfigManager::updateSection(const String& section, const String& json
         parseSensorConfig(doc.as<JsonObject>());
     } else if (section == "system") {
         parseSystemConfig(doc.as<JsonObject>());
+    } else if (section == "relay") {
+        parseMotorConfig(doc.as<JsonObject>());
     } else {
         return ErrorCode::ERR_CONFIG_VALIDATE;
     }
@@ -764,6 +846,9 @@ String ConfigManager::getSectionJson(const String& section) const {
     } else if (section == "system") {
         JsonObject obj = doc.to<JsonObject>();
         serializeSystemConfig(obj);
+    } else if (section == "relay") {
+        JsonObject obj = doc.to<JsonObject>();
+        serializeMotorConfig(obj);
     }
     
     String output;

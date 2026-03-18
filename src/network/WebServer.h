@@ -23,6 +23,8 @@
 #include "../sensor/ISensor.h"
 #include "../tank/TankCalculator.h"
 
+class IMotorController;
+
 /** OTA hooks: prepare frees MQTT/WS (and optionally HTTP for Arduino OTA path). */
 typedef void (*FlmOtaPrepareFn)();
 typedef void (*FlmOtaRestoreFn)();
@@ -62,7 +64,8 @@ public:
      * @param otaRestore Called on upload abort/failure
      */
     WebServerManager(ISensor& sensor, TankCalculator& calculator,
-                     FlmOtaPrepareFn otaPrepare, FlmOtaRestoreFn otaRestore);
+                     FlmOtaPrepareFn otaPrepare, FlmOtaRestoreFn otaRestore,
+                     IMotorController* motor = nullptr);
     
     /**
      * @brief Initialize web server
@@ -133,7 +136,7 @@ private:
     void handleApiReset();
     void handleApiInfo();
 
-    // API handlers - Pump (Phase 2 / RelayManager)
+    // API handlers - Pump (motor_* firmware)
     void handleApiPumpGet();
     void handleApiPumpPost();
 
@@ -158,6 +161,7 @@ private:
     bool _firmwareUploadOk;         ///< Last web OTA result
     FlmOtaPrepareFn _otaPrepare;
     FlmOtaRestoreFn _otaRestore;
+    IMotorController* _motor;     ///< nullptr on sensor_only builds
 };
 
 #endif // WEB_SERVER_H

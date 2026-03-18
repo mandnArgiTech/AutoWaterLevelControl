@@ -1,26 +1,7 @@
 /**
  * @file main.cpp
- * @brief FluidLevelMonitor - Sintex Tank Water Level Monitoring System
- * 
- * Features:
- * - Water level measurement using pluggable sensor interface
- * - Percentage filled / remaining, height in centimeters
- * - WiFi connectivity with AP fallback (FluidLM_<deviceid>)
- * - MQTT publishing in JSON with timestamps
- * - Web interface + REST API
- * - WebSocket for real-time calibration (cm)
- * - OTA firmware updates
- * - Configuration stored in LittleFS
- * - 3-stage signal filtering (Median → Moving-Avg → Kalman)
- * 
- * Hardware:
- * - NodeMCU v2 (ESP8266)
- * - Default sensor: US-100 on D1/D2
- * 
- * @author FluidLevelMonitor Project
- * @version 1.1.0
+ * @brief FluidLevelMonitor — sensor_only | motor_relay | motor_sms (see platformio.ini)
  */
-
 #include <Arduino.h>
 
 #include "version.h"
@@ -36,25 +17,27 @@
 #include "network/CalibrationWS.h"
 #include "utils/Log.h"
 #include "utils/FlmTime.h"
-#include "relay/RelayManager.h"
 
-// =============================================================================
-// Global objects
-// =============================================================================
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+#include "motor/MotorControllerFactory.h"
+#include "motor/IMotorController.h"
+#endif
 
 ISensor*              activeSensor   = nullptr;
 TankCalculator*       calculator     = nullptr;
 WebServerManager*     webServer      = nullptr;
 CalibrationWebSocket* calibrationWS  = nullptr;
 
-// Timing
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+IMotorController*     flmMotor       = nullptr;
+#endif
+
 unsigned long lastSensorRead   = 0;
 unsigned long lastMQTTPublish  = 0;
 unsigned long lastStatusPrint  = 0;
 
 #define STATUS_PRINT_INTERVAL  10000
 
-// Forward declarations
 void initializeSystem();
 void processLoop();
 void readSensor();
@@ -73,10 +56,6 @@ void fluidRestoreAfterOTA() {
     MQTTManager::getInstance().restoreAfterOTA();
 }
 
-// =============================================================================
-// setup()
-// =============================================================================
-
 void setup() {
     Serial.begin(115200);
     delay(100);
@@ -84,28 +63,18 @@ void setup() {
     initializeSystem();
 }
 
-// =============================================================================
-// Initialization (order is required for stable boot)
-// =============================================================================
-// 1. ConfigManager + LittleFS   2. ErrorHandler   3. Sensor + TankCalculator
-// 4. WiFiManager   5. TimeManager   6. MQTTManager   7. Web + Calibration WS
-// 8. OTA callbacks on WiFiManager   9. First sensor read
-
 void initializeSystem() {
     Serial.println(F("\n========== System Initialization ==========\n"));
 
-    // --- Config ---
     Serial.println(F(">>> Configuration..."));
     ErrorCode result = ConfigManager::getInstance().begin();
     if (result != ErrorCode::ERR_NONE) {
         Serial.println(F("WARNING: config init had issues"));
     }
 
-    // --- Error handler ---
     Serial.println(F("\n>>> Error Handler..."));
     ErrorHandler::getInstance().begin();
 
-    // --- Sensor ---
     Serial.println(F("\n>>> Sensor..."));
     SensorConfig& sensorCfg = ConfigManager::getInstance().getSensorConfig();
     Serial.printf("[Main] Sensor type: %s\n", sensorCfg.hardware.type.c_str());
@@ -133,7 +102,6 @@ void initializeSystem() {
     activeSensor->setCalibrationOffset(sensorCfg.offsetMm);
     Serial.printf("[Main] Calibration offset: %.1f cm\n", sensorCfg.offsetMm / 10.0f);
 
-    // Configure filter pipeline (polymorphic — no casts needed)
     activeSensor->configureFilter(
         sensorCfg.filterEnabled,
         sensorCfg.medianFilterSize,
@@ -142,7 +110,6 @@ void initializeSystem() {
         sensorCfg.kalmanProcessNoise,
         sensorCfg.kalmanMeasureNoise);
 
-    // --- Tank calculator ---
     Serial.println(F("\n>>> Tank Calculator..."));
     calculator = new TankCalculator(*activeSensor);
     if (!calculator) {
@@ -154,7 +121,6 @@ void initializeSystem() {
         Serial.println(F("WARNING: tank calculator init had issues"));
     }
 
-    // --- WiFi ---
     Serial.println(F("\n>>> WiFi..."));
     WiFiManager::getInstance().setStateCallback(handleWiFiStateChange);
     result = WiFiManager::getInstance().begin();
@@ -162,11 +128,9 @@ void initializeSystem() {
         Serial.println(F("WARNING: WiFi init had issues"));
     }
 
-    // --- Time ---
     Serial.println(F("\n>>> Time Manager..."));
     TimeManager::getInstance().begin();
 
-    // --- MQTT ---
     Serial.println(F("\n>>> MQTT..."));
     MQTTManager::getInstance().setMessageCallback(handleMQTTMessage);
     result = MQTTManager::getInstance().begin();
@@ -174,12 +138,25 @@ void initializeSystem() {
         Serial.println(F("INFO: MQTT disabled"));
     }
 
-    // --- Web Server ---
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+    flmMotor = MotorControllerFactory::create();
+    if (flmMotor) {
+        MotorConfig& mc = ConfigManager::getInstance().getMotorConfig();
+        flmMotor->begin(mc);
+        Serial.println(F("[Main] Motor controller initialized (config relay section)"));
+    }
+#endif
+
     Serial.println(F("\n>>> Web Server..."));
-    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA, fluidRestoreAfterOTA);
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA,
+                                     fluidRestoreAfterOTA, flmMotor);
+#else
+    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA,
+                                     fluidRestoreAfterOTA, nullptr);
+#endif
     if (webServer) webServer->begin();
 
-    // --- Calibration WebSocket ---
     Serial.println(F("\n>>> Calibration WebSocket..."));
     calibrationWS = new CalibrationWebSocket(*activeSensor, *calculator);
     if (calibrationWS) calibrationWS->begin();
@@ -193,27 +170,13 @@ void initializeSystem() {
         fluidRestoreAfterOTA();
     });
 
-    // --- Initial reading ---
     Serial.println(F("\n>>> Initial sensor reading..."));
     readSensor();
 
-    // --- Done ---
     Serial.println(F("\n========== Initialization Complete =========="));
 
-    // --- Relay / Pump (Phase 2) ---
-    Serial.println(F("\n>>> Relay Manager..."));
-    RelayConfig relayCfg;
-    relayCfg.enabled        = true;
-    relayCfg.pin            = D5;          // GPIO14 — change via config future
-    relayCfg.activeLow      = true;
-    relayCfg.pumpOnPercent  = 20.0f;
-    relayCfg.pumpOffPercent = 85.0f;
-    relayCfg.maxRunMinutes  = 30;
-    RelayManager::getInstance().begin(relayCfg);
-
-    // --- Watchdog ---
-    ESP.wdtEnable(8000);                   // 8-second software watchdog
-    Serial.println();
+    /* ESP8266: hardware WDT ~3.2s; wdtEnable(ms) is a no-op on core 3.x — feed in loop. */
+    Serial.println(F("[Main] WDT fed each loop (~3.2s window on ESP8266)\n"));
 
     if (WiFiManager::getInstance().isConnected()) {
         Serial.printf("Web:  http://%s/\n", WiFiManager::getInstance().getIP().c_str());
@@ -229,10 +192,6 @@ void initializeSystem() {
     Serial.println(F("\n================================================\n"));
 }
 
-// =============================================================================
-// loop()
-// =============================================================================
-
 void loop() {
     processLoop();
 }
@@ -241,7 +200,7 @@ void processLoop() {
     WiFiManager::getInstance().loop();
     if (WiFiManager::getInstance().isOTAInProgress()) return;
 
-    ESP.wdtFeed();                         // feed watchdog each loop iteration
+    ESP.wdtFeed();
 
     TimeManager::getInstance().loop();
     MQTTManager::getInstance().loop();
@@ -249,22 +208,20 @@ void processLoop() {
     if (webServer) webServer->loop();
     if (calibrationWS) calibrationWS->loop();
 
-    // Sensor reading (skip during calibration)
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+    float motorPct = -1.f;
+    WaterLevel lv = calculator->getLastLevel();
+    if (lv.sensorOk && lv.valid) motorPct = lv.percentFilled;
+    if (flmMotor) flmMotor->loop(motorPct);
+#endif
+
     if (!calibrationWS || !calibrationWS->isActive()) {
         uint32_t interval = ConfigManager::getInstance().getSensorConfig().readInterval;
         if (flmElapsedMs(lastSensorRead, interval)) {
             readSensor();
-            // Update relay with fresh level
-            WaterLevel lv = calculator->getLastLevel();
-            if (lv.sensorOk && lv.valid) {
-                RelayManager::getInstance().loop(lv.percentFilled);
-            }
         }
-    } else {
-        RelayManager::getInstance().loop(calculator->getLastLevel().percentFilled);
     }
 
-    // MQTT publish
     MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
     if (mqttCfg.enabled && MQTTManager::getInstance().isConnected()) {
         if (flmElapsedMs(lastMQTTPublish, mqttCfg.publishInterval)) {
@@ -272,7 +229,6 @@ void processLoop() {
         }
     }
 
-    // Serial status
     if (ConfigManager::getInstance().getSystemConfig().debugEnabled) {
         if (flmElapsedMs(lastStatusPrint, STATUS_PRINT_INTERVAL)) {
             printStatus();
@@ -282,11 +238,8 @@ void processLoop() {
     yield();
 }
 
-// =============================================================================
-// Sensor / MQTT / Status
-// =============================================================================
-
 void readSensor() {
+    lastSensorRead = millis();
     WaterLevel level = calculator->calculate();
     SystemConfig& cfg = ConfigManager::getInstance().getSystemConfig();
     if (!cfg.debugEnabled) return;
@@ -306,7 +259,6 @@ void readSensor() {
 void publishMQTT() {
     if (!MQTTManager::getInstance().isConnected()) return;
 
-    // Always publish — JSON includes sensorOk flag so subscribers know the status
     String ts  = TimeManager::getInstance().getISO8601();
     String json = calculator->getMQTTJson(ts);
     bool ok = MQTTManager::getInstance().publishWaterLevel(json);
@@ -354,10 +306,6 @@ void printStatus() {
     Serial.println(F("--------------\n"));
 }
 
-// =============================================================================
-// Callbacks
-// =============================================================================
-
 void handleWiFiStateChange(WifiMgrState state) {
     FLM_LOG_INFO("Main", "WiFi -> %s", WiFiManager::stateToString(state).c_str());
 
@@ -372,29 +320,27 @@ void handleWiFiStateChange(WifiMgrState state) {
 void handleMQTTMessage(const String& topic, const String& payload) {
     FLM_LOG_DEBUG("Main", "MQTT %s", topic.c_str());
 
-    if (topic.endsWith("/command")) {
-        JsonDocument doc;
-        if (deserializeJson(doc, payload)) return;
+    if (!topic.endsWith("/command")) return;
 
-        String cmd = doc["command"] | "";
-        if (cmd == "read") {
-            readSensor();
-            publishMQTT();
-        } else if (cmd == "status") {
-            MQTTManager::getInstance().publishStatus();
-        } else if (cmd == "restart") {
-            Serial.println(F("[Main] Restarting..."));
-            delay(500);
-            ESP.restart();
-        } else if (cmd == "pump_on") {
-            RelayManager::getInstance().setMode(PumpMode::ON);
-            MQTTManager::getInstance().publish("pump", RelayManager::getInstance().getMQTTJson(), false);
-        } else if (cmd == "pump_off") {
-            RelayManager::getInstance().setMode(PumpMode::OFF);
-            MQTTManager::getInstance().publish("pump", RelayManager::getInstance().getMQTTJson(), false);
-        } else if (cmd == "pump_auto") {
-            RelayManager::getInstance().setMode(PumpMode::AUTO);
-            MQTTManager::getInstance().publish("pump", RelayManager::getInstance().getMQTTJson(), false);
-        }
+    JsonDocument doc;
+    if (deserializeJson(doc, payload)) return;
+
+    String cmd = doc["command"] | "";
+    if (cmd == "read") {
+        readSensor();
+        publishMQTT();
+    } else if (cmd == "status") {
+        MQTTManager::getInstance().publishStatus();
+    } else if (cmd == "restart") {
+        Serial.println(F("[Main] Restarting..."));
+        delay(500);
+        ESP.restart();
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+    } else if (flmMotor && (cmd == "pump_on" || cmd == "pump_off" || cmd == "pump_auto")) {
+        if (cmd == "pump_on") flmMotor->setMode(MotorMode::ON);
+        else if (cmd == "pump_off") flmMotor->setMode(MotorMode::OFF);
+        else flmMotor->setMode(MotorMode::AUTO);
+        MQTTManager::getInstance().publish("motor/status", flmMotor->getMQTTJson(), false);
+#endif
     }
 }

@@ -1,4 +1,9 @@
 #include "RelayMotorController.h"
+#include "../utils/ErrorHandler.h"
+
+static bool isForbiddenBootPin(int pin) {
+    return pin == 0 || pin == 1 || pin == 2;
+}
 
 ErrorCode RelayMotorController::begin(const MotorConfig& config) {
     _config = config;
@@ -7,11 +12,22 @@ ErrorCode RelayMotorController::begin(const MotorConfig& config) {
         FLM_LOG_INFO("RelayMotor", "disabled");
         return ErrorCode::ERR_NONE;
     }
+    if (isForbiddenBootPin(_config.pin)) {
+        FLM_LOG_ERROR("RelayMotor", "pin %d is a boot/strapping pin — choose another GPIO",
+                      _config.pin);
+        ErrorHandler::getInstance().logError(ErrorCode::ERR_CONFIG_VALIDATE,
+            "Relay pin cannot be GPIO0/1/2");
+        _state = MotorState::DISABLED;
+        return ErrorCode::ERR_CONFIG_VALIDATE;
+    }
     if (_config.maxRunMinutes > MOTOR_MAX_RUN_MINUTES)
         _config.maxRunMinutes = MOTOR_MAX_RUN_MINUTES;
 
+    // Avoid active-low relay glitch: set safe level before OUTPUT
+    const int offLevel = _config.activeLow ? HIGH : LOW;
+    digitalWrite(_config.pin, offLevel);
     pinMode(_config.pin, OUTPUT);
-    setRelay(false);
+
     _mode  = MotorMode::AUTO;
     _state = MotorState::STOPPED;
     _initialized = true;
@@ -22,13 +38,24 @@ ErrorCode RelayMotorController::begin(const MotorConfig& config) {
 void RelayMotorController::loop(float percentFilled) {
     if (!_initialized || _state == MotorState::DISABLED) return;
     _lastPct = percentFilled;
+    const bool levelKnown = (percentFilled >= 0.f && percentFilled <= 100.f);
+
+    if (!levelKnown) {
+        if (_state == MotorState::RUNNING) checkMaxRuntime();
+        if (_state == MotorState::RUNNING && _mode == MotorMode::OFF) stopMotor("manual_off");
+        if (_state == MotorState::STOPPED && _mode == MotorMode::ON) startMotor();
+        return;
+    }
+
     if (checkDryRun(percentFilled)) return;
-    if (_state == MotorState::RUNNING) { checkMaxRuntime(); }
+    if (_state == MotorState::RUNNING) checkMaxRuntime();
     if (_state == MotorState::RUNNING && _mode == MotorMode::OFF) stopMotor("manual_off");
-    if (_state == MotorState::STOPPED && _mode == MotorMode::ON)  startMotor();
+    if (_state == MotorState::STOPPED && _mode == MotorMode::ON) startMotor();
     if (_mode == MotorMode::AUTO) {
-        if (_state == MotorState::STOPPED && percentFilled < _config.pumpOnPercent)  startMotor();
-        if (_state == MotorState::RUNNING && percentFilled >= _config.pumpOffPercent) stopMotor("auto_threshold");
+        if (_state == MotorState::STOPPED && percentFilled < _config.pumpOnPercent)
+            startMotor();
+        if (_state == MotorState::RUNNING && percentFilled >= _config.pumpOffPercent)
+            stopMotor("auto_threshold");
     }
 }
 
@@ -53,10 +80,11 @@ void RelayMotorController::startMotor() {
 
 void RelayMotorController::stopMotor(const char* reason) {
     if (_state == MotorState::STOPPED) return;
+    uint32_t ranSec = getRunSeconds();
     setRelay(false);
-    FLM_LOG_INFO("RelayMotor", "OFF [%s] ran %us", reason, getRunSeconds());
     _state = MotorState::STOPPED;
     _startedAt = 0;
+    FLM_LOG_INFO("RelayMotor", "OFF [%s] ran %us", reason, (unsigned)ranSec);
 }
 
 void RelayMotorController::setRelay(bool on) {
@@ -68,6 +96,7 @@ bool RelayMotorController::checkDryRun(float pct) {
     if (blocked && !_dryRunBlocked) {
         if (_state == MotorState::RUNNING) stopMotor("dry_run_guard");
         FLM_LOG_WARN("RelayMotor", "dry-run guard %.1f%%", pct);
+        ErrorHandler::getInstance().logError(ErrorCode::ERR_NONE, "Dry-run guard: pump blocked");
     }
     _dryRunBlocked = blocked;
     return blocked;
@@ -78,6 +107,8 @@ void RelayMotorController::checkMaxRuntime() {
         FLM_LOG_WARN("RelayMotor", "max runtime exceeded");
         stopMotor("max_runtime");
         _mode = MotorMode::OFF;
+        ErrorHandler::getInstance().logError(ErrorCode::ERR_NONE,
+            "Pump stopped: max runtime exceeded");
     }
 }
 
@@ -97,7 +128,9 @@ String RelayMotorController::getStatusJson() const {
     t["offPercent"]    = _config.pumpOffPercent;
     t["maxRunMinutes"] = _config.maxRunMinutes;
     t["dryRunGuardPct"]= MOTOR_DRY_RUN_GUARD_PCT;
-    String out; serializeJson(doc, out); return out;
+    String out;
+    serializeJson(doc, out);
+    return out;
 }
 
 String RelayMotorController::getMQTTJson() const {
@@ -107,5 +140,7 @@ String RelayMotorController::getMQTTJson() const {
     doc["mode"]        = modeToString(_mode);
     doc["runSeconds"]  = getRunSeconds();
     doc["blocked"]     = _dryRunBlocked;
-    String out; serializeJson(doc, out); return out;
+    String out;
+    serializeJson(doc, out);
+    return out;
 }

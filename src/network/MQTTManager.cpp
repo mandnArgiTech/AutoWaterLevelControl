@@ -137,6 +137,9 @@ ErrorCode MQTTManager::connect() {
         FLM_LOG_INFO("MQTT", "connected");
         publishStatus();
         subscribe("command");
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+        subscribe("motor/command");
+#endif
         return ErrorCode::ERR_NONE;
     }
 
