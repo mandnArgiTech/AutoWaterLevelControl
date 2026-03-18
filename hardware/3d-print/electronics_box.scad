@@ -1,132 +1,194 @@
 // ============================================================================
-// FILE 3: electronics_box.scad
+// electronics_box.scad — FluidLevelMonitor Weatherproof Electronics Enclosure
 //
-// Weatherproof electronics box — D1 Mini + 2× 32700 + power modules
-// Mounts on wall (2 screws) or on pipe (included pipe clip)
+// CONTENTS (all fit with measured clearances):
+//   2× 32700 LiFePO4 cells  dia 32.2mm, len 70.5mm  → side by side on floor
+//   D1 Mini ESP8266          PCB 34.2×25.6mm, headers below, components up
+//   MP1584 buck module       22×17×6mm (incl. trim pot)
+//   CN3058E charger module   ~30×20×5mm
+//   2S BMS module            ~50×12×4mm
 //
-// CONTENTS:
-//   • D1 Mini ESP8266 (on PCB tray, socketed)
-//   • 2× 32700 LiFePO4 cells (vertical, side by side)
-//   • MP1584 buck module (17×11mm)
-//   • CN3058E charger module (30×18mm typical)
-//   • 2S BMS module (40×10mm typical)
-//   • 100kΩ + 24kΩ battery divider resistors
+// INTERNAL LAYOUT (cross section, viewing from front):
 //
-// CABLE ENTRY: PG7 gland on bottom → 4-core cable → sensor
-// CHARGE PORT: USB-C panel-mount on right side
-// MOUNT: Two keyhole slots on back for wall screws
-//         OR pipe clip prints separately and bolts to back
+//   ┌──────────────────────────────────────────────────────┐ ← lid
+//   │                                                       │
+//   │   [D1 Mini on standoffs] [MP1584] [CN3058E] [BMS]    │ ← electronics shelf
+//   │   ─────────────────────────────────────────────────   │ ← shelf at Z=43
+//   │                                                       │
+//   │        [cell 1 ⌀33]          [cell 2 ⌀33]            │ ← cells in cradle
+//   │         ████████████          ████████████            │
+//   └──────────────────────────────────────────────────────┘ ← floor Z=0
+//        ↑                                           ↑
+//     72mm cell axis runs left-right in box
+//     (cells side by side, axes parallel, both along X)
 //
-// INTERNAL LAYOUT (side view, lid on left):
+// EXTERNAL:
+//   Outer: 95 × 82 × 88mm (W × D × H incl. lid)
+//   Back:  two M5 keyhole wall-mount slots, 80mm apart
+//   Right: USB-C charge port (10×7.8mm cutout)
+//   Front: 2× 3mm LED holes (charge / standby)
+//   Bottom: PG7 gland (12.2mm hole) — cable to sensor mount
+//   Back top corner: 3mm vent hole + 8mm pocket for Gore-Tex membrane
 //
-//   LID │ [USB-C]    [D1 Mini on tray]  [CN3058E] │ BACK
-//       │                                 [MP1584]  │
-//       │   [Cell 1]    [Cell 2]          [BMS]    │
-//       │                                           │
-//       │              [PG7 gland cable exit]       │
+// PARTS:
+//   PART="body"      — main shell
+//   PART="lid"       — screw-on lid (4× M3)
+//   PART="pipe_clip" — clip for 25mm or 32mm standpipe (pipe_od parameter)
 //
-// PRINT: ASA, 4 walls, 0.2mm layers
+// PRINT: ASA  |  4 walls  |  0.2mm layer  |  40% gyroid  |  5mm brim
 // ============================================================================
 
 $fn = 72;
 
-// ── Box outer dimensions ──────────────────────────────────────────────────────
-BW = 130;    // width  (X) — enough for 2× cells (66mm) + electronics
-BD = 75;     // depth  (Y) — front to back
-BH = 70;     // height (Z) — cell height (72mm) + floor + lid clearance... 
-             //              cells are horizontal so fits in 70mm Y
-WT = 3.5;    // wall thickness
+// ── Verified component dimensions ────────────────────────────────────────────
 
-// Inner cavity
-IW = BW - 2*WT;  // 123
-ID = BD - 2*WT;  // 68
-IH = BH - 2*WT;  // 63
+// 32700 cell
+C_DIA     = 32.2;          // actual diameter
+C_LEN     = 70.5;          // actual length
+C_CLR     = 0.8;           // radial clearance in pocket each side
+C_LCLEAR  = 1.0;           // axial clearance each end
+CP_D      = C_DIA + 2*C_CLR;   // pocket diameter = 33.8mm
+CP_L      = C_LEN + 2*C_LCLEAR; // pocket length  = 72.5mm
+C_SPACING = C_DIA + 4;         // centre-to-centre of two cells = 36.2mm
+                               // (2mm gap between cell bodies)
 
-// ── Lid ───────────────────────────────────────────────────────────────────────
-LID_H     = 12;   // lid height
-LID_PLAY  = 0.3;  // clearance
+// D1 Mini
+D1_PCB_L  = 34.2;   // PCB long axis
+D1_PCB_W  = 25.6;   // PCB short axis
+D1_PCB_T  = 1.6;    // PCB thickness
+D1_HDR_P  = 8.5;    // header pin length below PCB plastic (pin + plastic)
+D1_CPT_H  = 5.0;    // component height above PCB top (ESP module, USB)
+D1_TOTAL  = D1_HDR_P + D1_PCB_T + D1_CPT_H;  // = 15.1mm total height
+// Pin rows: 22.86mm (0.9") apart, 8 pins each, 2.54mm pitch
+D1_ROW_SP = 22.86;  // row separation (centre to centre)
+D1_SO_H   = 3.5;    // standoff height (raises PCB so pins clear floor)
+D1_MH_D   = 2.4;    // M2 mounting hole clearance
+// Mounting holes at ~2.5mm from each corner edge
+D1_MH_X   = D1_PCB_L/2 - 2.5;  // ±16.1mm from PCB centre
+D1_MH_Y   = D1_PCB_W/2 - 2.5;  // ±10.3mm from PCB centre
 
-// ── Corner radius ─────────────────────────────────────────────────────────────
-CR = 7;
+// MP1584 buck module
+BK_L      = 22.0;
+BK_W      = 17.0;
+BK_H      = 6.0;   // PCB 4mm + trim pot 2mm
+BK_CLR    = 0.5;   // pocket clearance each side
 
-// ── M4 lid screws (4 corner bosses) ──────────────────────────────────────────
-BOSS_OD = 9;
-BOSS_H  = 14;
-BOSS_ID = 3.3;    // M4 self-tap
+// CN3058E charger (approximate — varies by vendor)
+CH_L      = 32.0;
+CH_W      = 20.0;
+CH_H      = 6.0;
+CH_CLR    = 0.5;
 
-// ── 32700 cells — horizontal orientation ─────────────────────────────────────
-// Cells lie on their side along the box width
-// Diameter 32mm, length 70mm, clearance +1mm each
-CELL_D    = 33;
-CELL_L    = 71;
-// Two cells side by side along Y axis:
-//   Total Y span = 2 × 33 = 66mm < ID(68) ✓
-//   Cell length (71mm) along X axis < IW(123) ✓
-// Cells rest on floor, against back wall
+// 2S BMS module (flat strip style)
+BMS_L     = 52.0;
+BMS_W     = 12.0;
+BMS_H     = 4.0;
+BMS_CLR   = 0.5;
 
-// ── PCB tray rail positions ───────────────────────────────────────────────────
-TRAY_Z    = WT + CELL_D + 5;   // shelf above cells
+// ── Box geometry ──────────────────────────────────────────────────────────────
+WT        = 3.5;     // wall thickness
+LID_H     = 12.0;    // lid height
+LID_PLAY  = 0.3;     // lid spigot clearance
 
-// ── Cable gland (PG7, hole 12mm) on bottom face ──────────────────────────────
-GLAND_D   = 12.2;
-GLAND_X   = -IW/2 + 20;   // offset from centre toward front-left
-GLAND_BOSS_H = 5;
+// Internal dimensions — driven by component layout
+// Width (X): cells along X = CP_L = 72.5mm, plus walls
+// Depth (Y): 2 cells side by side = 2×CP_D/2 + C_SPACING ≈ 66mm, plus walls
+// Height (Z):
+//   Floor WT = 3.5
+//   Cell diameter (sitting in semicircle cradle, centred) = CP_D = 33.8mm
+//   Gap above cells to shelf = 5mm (wiring)
+//   Shelf thickness = 2.5mm
+//   Standoff D1_SO_H = 3.5mm
+//   D1 Mini total = D1_TOTAL = 15.1mm
+//   Headroom above D1 = 3mm
+//   Total interior = 33.8 + 5 + 2.5 + 3.5 + 15.1 + 3 = 62.9mm → 64mm
 
-// ── USB-C cutout on right side wall ──────────────────────────────────────────
-USBC_W    = 10.2;
-USBC_H    = 7.8;
-USBC_CR   = 2.0;
-USBC_Z    = WT + CELL_D + 8;   // above cells, aligned with electronics shelf
+IW        = CP_L + 16;       // 88.5mm → internal width (X)
+ID_inner  = C_SPACING + CP_D + 10; // ~80mm → internal depth (Y)
+IH        = 64.0;            // internal height (Z) as calculated
 
-// ── LED holes (2× 3mm, right side wall, above USB-C) ────────────────────────
-LED_D     = 3.2;
-LED_Z     = USBC_Z + 14;
+OW        = IW + 2*WT;       // outer width
+OD_outer  = ID_inner + 2*WT; // outer depth
+OH_body   = IH + WT;         // outer body height (lid sits on top)
+OH_total  = OH_body + LID_H; // total incl. lid
 
-// ── Gasket groove (top of body, for 2×2mm EPDM cord) ─────────────────────────
+// Key Z heights (measured from inside floor = 0)
+Z_CELL_CTR = CP_D/2;         // cell centre height = 16.9mm
+Z_SHELF    = CP_D + 5;       // shelf floor Z = 38.8mm
+Z_D1_BOT   = Z_SHELF + 2.5 + D1_SO_H; // D1 PCB bottom face Z
+Z_D1_PINS  = Z_SHELF + 2.5;  // pin tips clear shelf top by standoff gap
+
+// Corner radius
+CR = 6;
+
+// ── Lid screw bosses (M3, 4 corners inside box) ───────────────────────────────
+BOSS_OD   = 8.0;
+BOSS_H    = 14.0;
+BOSS_ID   = 2.9;    // M3 self-tap pilot
+
+// ── Gasket groove (top face of body, 2×2mm EPDM cord) ────────────────────────
 GK_W = 2.2;
 GK_D = 1.8;
 
-// ── Wall mount keyhole slots (back face) ─────────────────────────────────────
-KH_D  = 8;       // keyhole head diameter (fits M5 screw head)
-KH_SD = 4.5;     // keyhole slot diameter (M5 shank passes through)
-KH_SL = 12;      // slot length
-KH_SPACING = 90; // centre-to-centre X
+// ── USB-C cutout ──────────────────────────────────────────────────────────────
+USBC_W  = 10.2;
+USBC_H  = 7.8;
+USBC_CR = 2.0;
+// Position: right side wall, centred on electronics shelf level
+USBC_Z  = WT + Z_SHELF + 10;   // centre of cutout
+
+// ── PG7 cable gland ───────────────────────────────────────────────────────────
+GLAND_D  = 12.2;
+// Position: bottom face, offset from centre toward one corner
+GLAND_X  = IW/2 - 20;   // 20mm from right inner wall
+GLAND_Y  = 0;            // centred front-back
+
+// ── Keyhole wall-mount slots (back face) ─────────────────────────────────────
+KH_HEAD  = 9.0;    // M5 screw head dia
+KH_SLOT  = 5.2;    // M5 shank dia
+KH_LEN   = 14.0;   // slot travel length
+KH_DIST  = 70.0;   // centre-to-centre X spacing
+KH_Z     = 30.0;   // height from box base
+
+// ── Vent hole (back face, top corner) ────────────────────────────────────────
+VENT_D      = 3.0;
+VENT_PKT_D  = 8.5;   // recess pocket for Gore-Tex membrane
+VENT_PKT_H  = 2.5;
+
+// ── Pipe clip ────────────────────────────────────────────────────────────────
+PIPE_OD     = 32;    // override with parameter
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-module rounded_rect(w, d, h, r) {
-    hull() {
-        for (x = [-(w/2-r), (w/2-r)])
-        for (y = [-(d/2-r), (d/2-r)])
-            translate([x, y, 0]) cylinder(h=h, r=r, center=false);
-    }
+module hull_box(w, d, h, r) {
+    hull()
+        for (x=[-(w/2-r), w/2-r])
+        for (y=[-(d/2-r), d/2-r])
+            translate([x,y,0]) cylinder(h=h, r=r);
 }
 
-module usbc_hole(depth) {
-    hull() {
-        for (x = [-(USBC_H/2-USBC_CR), (USBC_H/2-USBC_CR)])
-        for (z = [-(USBC_W/2-USBC_CR), (USBC_W/2-USBC_CR)])
+module usbc_cutout(depth) {
+    hull()
+        for (x=[-(USBC_H/2-USBC_CR), USBC_H/2-USBC_CR])
+        for (z=[-(USBC_W/2-USBC_CR), USBC_W/2-USBC_CR])
             translate([x, 0, z]) rotate([90,0,0])
-                cylinder(h=depth, d=USBC_CR*2, center=true);
-    }
+                cylinder(h=depth, r=USBC_CR, center=true);
 }
 
 module screw_boss() {
     difference() {
         cylinder(h=BOSS_H, d=BOSS_OD);
-        translate([0, 0, -0.1]) cylinder(h=BOSS_H+0.2, d=BOSS_ID);
+        translate([0,0,-0.1]) cylinder(h=BOSS_H+0.2, d=BOSS_ID);
     }
 }
 
-module keyhole_slot(x_pos) {
-    // Vertical keyhole: round head at bottom, slot upward
-    translate([x_pos, 0, 0]) {
-        // Slot (M5 shank — 5mm wide)
-        translate([0, 0, KH_SL/2 + KH_D/2])
-            cube([KH_SD, WT+0.2, KH_SL], center=true);
-        // Head (M5 head — 9mm dia)
-        translate([0, 0, KH_D/2])
-            rotate([90,0,0])
-                cylinder(h=WT+0.2, d=KH_D, center=true);
+module keyhole(x_offset) {
+    translate([x_offset, 0, 0]) {
+        // M5 head pocket (wider, at entry point = lower Z)
+        translate([0, 0, 0])
+            rotate([90,0,0]) cylinder(h=WT+0.2, d=KH_HEAD, center=true);
+        // Slot above (narrower — screw locks in when box slides down)
+        translate([0, 0, KH_LEN/2 + KH_HEAD/2])
+            cube([KH_SLOT, WT+0.2, KH_LEN], center=true);
     }
 }
 
@@ -134,90 +196,134 @@ module keyhole_slot(x_pos) {
 // BOX BODY
 // ─────────────────────────────────────────────────────────────────────────────
 module box_body() {
-    body_h = BH - LID_H;
-
     difference() {
-        // Outer shell
-        rounded_rect(BW, BD, body_h, CR);
+        // ── Outer shell ───────────────────────────────────────────────────────
+        translate([0,0,0])
+            hull_box(OW, OD_outer, OH_body, CR);
 
-        // Inner cavity
+        // ── Inner cavity ──────────────────────────────────────────────────────
         translate([0, 0, WT])
-            rounded_rect(IW, ID, body_h, CR - WT);
+            hull_box(IW, ID_inner, IH + 1, CR - WT);
 
-        // Lid seat (shallow step at top for lid to locate)
-        translate([0, 0, body_h - LID_H - 0.5])
+        // ── Lid seat step (lid spigot locates here) ────────────────────────── 
+        translate([0, 0, OH_body - LID_H - 0.5])
             difference() {
-                rounded_rect(IW + 2*LID_PLAY + 1, ID + 2*LID_PLAY + 1,
-                             LID_H + 1, CR - WT);
-                rounded_rect(IW - 4, ID - 4, LID_H + 2, CR - WT - 2);
+                hull_box(IW + 2*(LID_PLAY+0.6),
+                         ID_inner + 2*(LID_PLAY+0.6), LID_H+1, CR-WT+0.5);
+                hull_box(IW - 4, ID_inner - 4, LID_H+2, CR-WT-2);
             }
 
-        // Gasket groove in top face
-        translate([0, 0, body_h - GK_D])
+        // ── Gasket groove on top mating face ──────────────────────────────────
+        translate([0, 0, OH_body - GK_D])
             difference() {
-                rounded_rect(IW - 2, ID - 2, GK_D + 0.1, CR - WT - 1);
-                rounded_rect(IW - 2 - 2*GK_W, ID - 2 - 2*GK_W,
-                             GK_D + 0.2, CR - WT - 1 - GK_W);
+                hull_box(IW - 1, ID_inner - 1, GK_D+0.1, CR-WT);
+                hull_box(IW - 1 - 2*GK_W, ID_inner - 1 - 2*GK_W,
+                         GK_D+0.2, CR-WT-GK_W);
             }
 
-        // Cable gland hole — bottom face
-        translate([GLAND_X, 0, -0.1])
-            cylinder(h=WT + 0.2, d=GLAND_D);
+        // ── PG7 cable gland hole — bottom face ───────────────────────────────
+        translate([GLAND_X, GLAND_Y, -0.1])
+            cylinder(h=WT+0.2, d=GLAND_D);
 
-        // USB-C cutout — right side wall
-        translate([BW/2, 0, USBC_Z])
-            rotate([0, 0, 0])
-                usbc_hole(WT + 0.2);
+        // ── USB-C port — right side wall ─────────────────────────────────────
+        translate([OW/2, 0, USBC_Z])
+            usbc_cutout(WT + 0.2);
 
-        // LED holes — right side wall
-        for (dz = [0, 8])
-            translate([BW/2 + 0.1, 10, LED_Z + dz])
-                rotate([0, 90, 0])
-                    cylinder(h=WT + 0.2, d=LED_D, center=true);
+        // ── LED holes — front face (2× charge indicator) ─────────────────────
+        for (dx=[-8, 8])
+            translate([dx, -(OD_outer/2), USBC_Z + 12])
+                rotate([90,0,0]) cylinder(h=WT+0.2, d=3.2, center=true);
 
-        // Keyhole slots — back face
-        translate([0, BD/2, 20])
-            rotate([90, 0, 0]) {
-                keyhole_slot(-KH_SPACING/2);
-                keyhole_slot( KH_SPACING/2);
+        // ── Keyhole wall mount slots — back face ──────────────────────────────
+        translate([0, OD_outer/2, KH_Z])
+            rotate([90,0,0]) {
+                keyhole(-KH_DIST/2);
+                keyhole( KH_DIST/2);
+            }
+
+        // ── Vent hole — back face, top corner ────────────────────────────────
+        translate([OW/2-15, OD_outer/2, OH_body-15])
+            rotate([90,0,0]) {
+                cylinder(h=WT+0.2, d=VENT_D, center=true);
+                // Membrane pocket (inside face recess)
+                translate([0, 0, -(WT/2+VENT_PKT_H/2)])
+                    cylinder(h=VENT_PKT_H+0.1, d=VENT_PKT_D, center=true);
             }
     }
 
-    // ── Interior features ─────────────────────────────────────────────────────
+    // ── Interior features (added after main subtract) ─────────────────────────
 
-    // Cell cradle ribs (3 thin ribs between and around cells)
-    // Cells run along X axis, stack in Y
-    translate([0, 0, WT]) {
-        // Rib between the two cells
-        cube([CELL_L + 2, 2, CELL_D * 0.5], center=true);
-        // Back stop (stops cells sliding backward)
-        translate([0, CELL_D + 2, CELL_D/4])
-            cube([CELL_L + 2, 2, CELL_D/2 + 2], center=true);
+    // Cell cradle: two semicircular troughs on floor
+    // Cells run along X axis, centred in box Y
+    // Trough centres at Y = ±C_SPACING/2
+    for (sign=[-1,1]) {
+        translate([0, sign*C_SPACING/2, WT])
+            difference() {
+                // Cradle wall (half-cylinder shaped block)
+                rotate([0,90,0])
+                    cylinder(h=CP_L+4, d=CP_D+2*2, center=true); // outer
+                // Cell pocket bore
+                rotate([0,90,0])
+                    cylinder(h=CP_L+0.2, d=CP_D, center=true);
+                // Cut away top half so cell drops in from above
+                translate([0, 0, CP_D/2+0.1])
+                    cube([CP_L+6, CP_D+6, CP_D], center=true);
+                // Floor clearance (cradle sits on floor)
+                translate([0,0,-CP_D/2-0.1])
+                    cube([CP_L+6, CP_D+6, CP_D], center=true);
+            }
     }
 
-    // Electronics shelf (above cells)
-    translate([0, 0, TRAY_Z]) {
+    // Divider rib between cells (stops lateral movement)
+    translate([0, 0, WT + CP_D*0.1])
+        cube([CP_L, 2.5, CP_D*0.8], center=true);
+
+    // Cell end-stop ribs (stops cells sliding axially)
+    for (sign=[-1,1])
+        translate([sign*(CP_L/2 + 1), 0, WT + CP_D/3])
+            cube([2.5, C_SPACING + CP_D, CP_D*0.6], center=true);
+
+    // Electronics shelf
+    shelf_z = WT + Z_SHELF;
+    translate([0, 0, shelf_z])
         difference() {
-            rounded_rect(IW - 0.4, ID - 0.4, 2.5, CR - WT);
-            // Wire passthrough
-            translate([IW/4, 0, -0.1]) cylinder(h=3, d=18);
-            // Cable from gland
-            translate([GLAND_X, 0, -0.1]) cylinder(h=3, d=16);
+            hull_box(IW - 0.4, ID_inner - 0.4, 2.5, CR-WT);
+            // Wiring passthrough holes
+            translate([IW/4, 0, -0.1])  cylinder(h=3, d=18);
+            translate([-IW/4, 0, -0.1]) cylinder(h=3, d=18);
+            // Cable gland clearance
+            translate([GLAND_X, GLAND_Y, -0.1]) cylinder(h=3, d=GLAND_D+4);
+        }
+
+    // D1 Mini standoffs on shelf (4 corners, M2 self-tap or press-fit)
+    for (sx=[-1,1]) for (sy=[-1,1])
+        translate([sx*D1_MH_X, sy*D1_MH_Y, shelf_z + 2.5])
+            difference() {
+                cylinder(h=D1_SO_H, d=5.5);
+                translate([0,0,-0.1]) cylinder(h=D1_SO_H+0.2, d=D1_MH_D);
+            }
+
+    // MP1584 module pocket walls on shelf (open top — module drops in)
+    bk_x = -IW/2 + BK_L/2 + BK_CLR + 5;  // left side of shelf
+    bk_y = -ID_inner/2 + BK_W/2 + BK_CLR + 5;
+    translate([bk_x, bk_y, shelf_z + 2.5]) {
+        difference() {
+            cube([BK_L+2*(BK_CLR+1.5), BK_W+2*(BK_CLR+1.5), BK_H+1], center=true);
+            cube([BK_L+2*BK_CLR, BK_W+2*BK_CLR, BK_H+2], center=true);
         }
     }
-
-    // 4 corner screw bosses for lid
-    for (x = [-(IW/2 - BOSS_OD/2 - 1), (IW/2 - BOSS_OD/2 - 1)])
-    for (y = [-(ID/2 - BOSS_OD/2 - 1), (ID/2 - BOSS_OD/2 - 1)])
-        translate([x, y, WT])
-            screw_boss();
 
     // Gland boss ring on floor
-    translate([GLAND_X, 0, WT + 0.1])
+    translate([GLAND_X, GLAND_Y, WT])
         difference() {
-            cylinder(h=GLAND_BOSS_H, d=GLAND_D + 8);
-            translate([0,0,-0.1]) cylinder(h=GLAND_BOSS_H+0.2, d=GLAND_D);
+            cylinder(h=4, d=GLAND_D+8);
+            translate([0,0,-0.1]) cylinder(h=5, d=GLAND_D);
         }
+
+    // 4× M3 lid screw bosses (inside corners)
+    for (bx=[-(IW/2-BOSS_OD/2-1), IW/2-BOSS_OD/2-1])
+    for (by=[-(ID_inner/2-BOSS_OD/2-1), ID_inner/2-BOSS_OD/2-1])
+        translate([bx, by, WT]) screw_boss();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -227,97 +333,100 @@ module box_lid() {
     difference() {
         union() {
             // Outer cap
-            rounded_rect(BW - 0.4, BD - 0.4, LID_H, CR - 0.2);
-            // Inner spigot
-            translate([0, 0, -5])
-                rounded_rect(IW + 2*LID_PLAY - 0.8,
-                             ID + 2*LID_PLAY - 0.8, 5.2, CR - WT - 0.3);
+            hull_box(OW-0.4, OD_outer-0.4, LID_H, CR-0.2);
+            // Inner spigot (locates into body seat)
+            translate([0,0,-5])
+                hull_box(IW + 2*LID_PLAY - 0.6,
+                         ID_inner + 2*LID_PLAY - 0.6, 5.2, CR-WT-0.3);
         }
 
         // Hollow lid (leave 3mm top plate)
-        translate([0, 0, -0.1])
-            rounded_rect(IW - 1, ID - 1, LID_H - 2.9, CR - WT - 0.5);
+        translate([0,0,-0.1])
+            hull_box(IW-0.8, ID_inner-0.8, LID_H-2.8, CR-WT-0.4);
 
-        // 4× M4 screw holes (matching bosses)
-        for (x = [-(IW/2 - BOSS_OD/2 - 1), (IW/2 - BOSS_OD/2 - 1)])
-        for (y = [-(ID/2 - BOSS_OD/2 - 1), (ID/2 - BOSS_OD/2 - 1)])
-            translate([x, y, -0.1])
-                cylinder(h=LID_H + 0.2, d=3.4);
+        // 4× M3 screw clearance holes
+        for (bx=[-(IW/2-BOSS_OD/2-1), IW/2-BOSS_OD/2-1])
+        for (by=[-(ID_inner/2-BOSS_OD/2-1), ID_inner/2-BOSS_OD/2-1])
+            translate([bx, by, -0.1])
+                cylinder(h=LID_H+0.2, d=3.4);
 
-        // Label recess + tank ID
-        translate([0, 8, LID_H - 1])
-            linear_extrude(1.3)
-                text("FluidMonitor", size=6,
+        // Embossed label
+        translate([0, 6, LID_H-1])
+            linear_extrude(1.2)
+                text("FluidMonitor", size=5.5,
                      font="Liberation Sans:style=Bold",
                      halign="center", valign="center");
 
-        // Blank slot for printed label strip (tank name)
-        translate([0, -10, LID_H - 0.8])
-            cube([55, 10, 1], center=true);
+        // Tank ID slot (insert printed label strip)
+        translate([0, -9, LID_H-0.8])
+            cube([52, 9, 1.0], center=true);
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PIPE CLIP (mounts box to 25mm or 32mm pipe standpipe beside tank)
-// Bolts to the two keyhole screw positions on box back
+// PIPE CLIP — mounts box to standpipe
+// Back of box has 2× M5 keyhole slots at ±KH_DIST/2 X, KH_Z height
+// This clip bolts to those same two holes
 // ─────────────────────────────────────────────────────────────────────────────
-module pipe_clip(pipe_od=32) {
-    // Pipe clip that wraps around pipe and has two M5 threaded inserts
-    // to bolt to back of box
-    CLIP_W  = 40;
-    CLIP_H  = 30;
-    CLIP_T  = 5;
-    PIPE_CLEARANCE = 0.5;
+module pipe_clip(pipe_od=PIPE_OD) {
+    PLATE_W = KH_DIST + 30;   // wide enough to span both keyholes
+    PLATE_H = 50;
+    PLATE_T = 4;
+    SADDLE_T = 5;
+    CLEARANCE = 0.5;
 
     difference() {
         union() {
-            // Back plate
-            cube([CLIP_W, CLIP_T, CLIP_H], center=true);
-            // Pipe saddle (semicircle)
-            translate([0, -(pipe_od/2 + CLIP_T/2), 0])
-                rotate([0, 90, 0])
-                    cylinder(h=CLIP_W, d=pipe_od + 8, center=true);
+            // Flat back plate
+            translate([0, 0, 0])
+                cube([PLATE_W, PLATE_T, PLATE_H], center=true);
+
+            // Pipe saddle (half-cylinder on front face)
+            translate([0, -(pipe_od/2 + PLATE_T/2), 0])
+                rotate([0,90,0])
+                    cylinder(h=PLATE_W, d=pipe_od + 2*SADDLE_T, center=true);
+
+            // Strap tabs (bolt together around pipe)
+            for (sign=[-1,1])
+                translate([sign*(PLATE_W/2+8), -(pipe_od/2+SADDLE_T/2), 0])
+                    cube([16, SADDLE_T, PLATE_H*0.7], center=true);
         }
 
         // Pipe bore
-        translate([0, -(pipe_od/2 + CLIP_T/2), 0])
-            rotate([0, 90, 0])
-                cylinder(h=CLIP_W + 0.2, d=pipe_od + PIPE_CLEARANCE, center=true);
+        translate([0, -(pipe_od/2 + PLATE_T/2), 0])
+            rotate([0,90,0])
+                cylinder(h=PLATE_W+0.2, d=pipe_od+CLEARANCE, center=true);
 
-        // M5 holes for box bolts (KH_SPACING apart)
-        for (x = [-KH_SPACING/2, KH_SPACING/2])
-            translate([x, 0, 0])
-                rotate([90, 0, 0])
-                    cylinder(h=CLIP_T + 0.2, d=5.2, center=true);
+        // Open the saddle bottom (so pipe can be inserted sideways)
+        translate([0, -(pipe_od + PLATE_T + SADDLE_T)*0.9, 0])
+            cube([PLATE_W+0.2, pipe_od*1.5, PLATE_H*0.5], center=true);
 
-        // Cut to open the saddle (so it can be clamped around pipe)
-        translate([0, -(pipe_od + CLIP_T + 8)/2, 0])
-            cube([CLIP_W + 0.2, pipe_od + 8, 3], center=true);
-    }
+        // M5 holes for box keyhole bolts
+        for (sign=[-1,1])
+            translate([sign*KH_DIST/2, 0, 0])
+                rotate([90,0,0])
+                    cylinder(h=PLATE_T+0.2, d=5.2, center=true);
 
-    // Clip strap tabs with M4 bolt holes (two halves bolt together around pipe)
-    for (sign = [-1, 1])
-        translate([sign * (CLIP_W/2 + 8), -(pipe_od/2 + CLIP_T), 0])
-            difference() {
-                cube([16, 8, CLIP_H], center=true);
-                rotate([0, 90, 0])
+        // M4 strap bolt holes
+        for (sign=[-1,1])
+            translate([sign*(PLATE_W/2+8), -(pipe_od/2+SADDLE_T/2), 0])
+                rotate([0,90,0])
                     cylinder(h=20, d=4.3, center=true);
-            }
+    }
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
+// Change PART to export each piece separately:
 PART = "body";
 // PART = "lid";
-// PART = "pipe_clip_25";   // for 25mm OD pipe
-// PART = "pipe_clip_32";   // for 32mm OD pipe
-// PART = "all";            // exploded assembly view
+// PART = "pipe_clip";
+// PART = "all";   // exploded preview
 
-if (PART == "body")            box_body();
-else if (PART == "lid")        box_lid();
-else if (PART == "pipe_clip_25") pipe_clip(25);
-else if (PART == "pipe_clip_32") pipe_clip(32);
+if      (PART == "body")      box_body();
+else if (PART == "lid")       box_lid();
+else if (PART == "pipe_clip") pipe_clip(32);
 else if (PART == "all") {
     box_body();
-    translate([0, 0, BH - LID_H + 5]) box_lid();
-    translate([BW + 20, 0, 0]) pipe_clip(32);
+    translate([0, 0, OH_body + 8]) box_lid();
+    translate([OW + 20, 0, PLATE_H/2]) rotate([90,0,0]) pipe_clip(32);
 }
