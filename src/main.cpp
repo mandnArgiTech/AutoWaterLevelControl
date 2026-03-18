@@ -17,6 +17,8 @@
 #include "network/CalibrationWS.h"
 #include "utils/Log.h"
 #include "utils/FlmTime.h"
+#include "utils/BatteryMonitor.h"
+#include "relay/RelayManager.h"
 
 #if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
 #include "motor/MotorControllerFactory.h"
@@ -236,6 +238,24 @@ void processLoop() {
     }
 
     yield();
+
+#ifdef FLM_DEEP_SLEEP_ENABLED
+    // Deep sleep mode: after publishing, sleep until next cycle
+    static bool hasSentFirstReading = false;
+    MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
+    if (mqttCfg.enabled && MQTTManager::getInstance().isConnected() && hasSentFirstReading) {
+        float bv = BatteryMonitor::readVoltage();
+        uint32_t sleepSec = FLM_SLEEP_SECONDS;
+        if (bv < BATT_VOLTAGE_CRITICAL) sleepSec = FLM_SLEEP_CRITICAL;
+        else if (bv < BATT_VOLTAGE_LOW) sleepSec = FLM_SLEEP_LOW_BATT;
+        FLM_LOG_INFO("Main", "Deep sleep %us (batt %.2fV)", sleepSec, bv);
+        MQTTManager::getInstance().disconnect();
+        WiFiManager::getInstance().disconnect();
+        delay(200);
+        ESP.deepSleep((uint64_t)sleepSec * 1000000UL);
+    }
+    hasSentFirstReading = true;
+#endif
 }
 
 void readSensor() {
@@ -261,6 +281,17 @@ void publishMQTT() {
 
     String ts  = TimeManager::getInstance().getISO8601();
     String json = calculator->getMQTTJson(ts);
+
+#ifdef FLM_BATTERY_MONITOR
+    // Inject battery status into MQTT payload
+    JsonDocument doc;
+    deserializeJson(doc, json);
+    JsonDocument battDoc;
+    deserializeJson(battDoc, BatteryMonitor::getJson());
+    doc["battery"] = battDoc;
+    serializeJson(doc, json);
+#endif
+
     bool ok = MQTTManager::getInstance().publishWaterLevel(json);
 
     if (ok && ConfigManager::getInstance().getSystemConfig().debugEnabled) {
