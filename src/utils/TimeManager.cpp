@@ -278,6 +278,7 @@ String TimeManager::getStatusJson() const {
     JsonDocument doc;
     
     doc["synchronized"] = _synchronized;
+    doc["timeValid"] = _synchronized;
     doc["timestamp"] = (unsigned long)getTimestamp();
     doc["iso8601"] = getISO8601();
     doc["date"] = getDateString();

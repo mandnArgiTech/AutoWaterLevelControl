@@ -248,6 +248,13 @@
       "description": "Filesystem is full",
       "action": "Remove unused files"
     },
+    "507": {
+      "code": "E507",
+      "name": "ERR_CONFIG_LOCKED",
+      "severity": "warning",
+      "description": "Configuration write already in progress",
+      "action": "Retry the request shortly"
+    },
 
     "600": {
       "code": "E600",

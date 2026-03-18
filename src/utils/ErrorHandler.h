@@ -83,6 +83,7 @@ enum class ErrorCode : uint16_t {
     ERR_CONFIG_VALIDATE     = 504,  ///< Config validation failed
     ERR_FS_MOUNT            = 505,  ///< Filesystem mount failed
     ERR_FS_FULL             = 506,  ///< Filesystem full
+    ERR_CONFIG_LOCKED       = 507,  ///< Config write already in progress
     
     // Web errors (6xx)
     ERR_WEB_INIT            = 600,  ///< Web server init failed
@@ -270,7 +271,18 @@ private:
     ErrorHandler& operator=(const ErrorHandler&) = delete;
     
     void lookupError(ErrorCode code, String& name, String& desc, ErrorSeverity& sev) const;
+    void lookupErrorFromFile(ErrorCode code, String& name, String& desc, ErrorSeverity& sev) const;
     static ErrorSeverity defaultSeverityFromCode(uint16_t codeNum);
+
+    static const size_t LOOKUP_CACHE_SIZE = 8;
+    mutable struct {
+        ErrorCode code;
+        bool valid;
+        String name;
+        String desc;
+        ErrorSeverity sev;
+    } _lookupCache[LOOKUP_CACHE_SIZE];
+    mutable uint8_t _lookupCacheNext;
 
     // Member variables
     bool _initialized;                              ///< Initialization flag

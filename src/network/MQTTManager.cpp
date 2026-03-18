@@ -8,6 +8,7 @@
 
 #include "MQTTManager.h"
 #include "../version.h"
+#include "../utils/Log.h"
 
 MQTTManager* MQTTManager::_instance = nullptr;
 
@@ -31,6 +32,7 @@ MQTTManager::MQTTManager()
     , _messageCallback(nullptr)
     , _stateCallback(nullptr)
     , _lastConnectAttempt(0)
+    , _reconnectDelayMs(MQTT_RECONNECT_INTERVAL)
     , _publishCount(0)
     , _publishErrors(0) {
 
@@ -42,19 +44,19 @@ MQTTManager::MQTTManager()
 // =============================================================================
 
 ErrorCode MQTTManager::begin() {
-    Serial.println(F("[MQTTManager] Initializing..."));
+    FLM_LOG_INFO("MQTT", "Initializing...");
 
     MQTTConfig& config = ConfigManager::getInstance().getMQTTConfig();
 
     if (!config.enabled) {
-        Serial.println(F("[MQTTManager] MQTT is disabled"));
+        FLM_LOG_INFO("MQTT", "disabled");
         setState(MQTTState::DISABLED);
         _initialized = true;
         return ErrorCode::ERR_MQTT_DISABLED;
     }
 
     if (config.server.length() == 0) {
-        Serial.println(F("[MQTTManager] No broker configured"));
+        FLM_LOG_WARN("MQTT", "no broker configured");
         setState(MQTTState::DISABLED);
         return ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_INIT, "No server");
     }
@@ -66,15 +68,13 @@ ErrorCode MQTTManager::begin() {
     _mqttClient.setKeepAlive(MQTT_KEEPALIVE);
     _mqttClient.setCallback(mqttCallback);
 
-    Serial.printf("[MQTTManager] Broker: %s:%d\n", config.server.c_str(), config.port);
-    Serial.printf("[MQTTManager] Device tag: %s\n", _deviceTag.c_str());
-    Serial.printf("[MQTTManager] Client ID: %s\n", _uniqueClientId.c_str());
-    Serial.printf("[MQTTManager] Topic example: %s\n", getTopic("level").c_str());
+    FLM_LOG_INFO("MQTT", "broker %s:%u", config.server.c_str(), (unsigned)config.port);
+    FLM_LOG_DEBUG("MQTT", "device %s client %s", _deviceTag.c_str(), _uniqueClientId.c_str());
 
     setState(MQTTState::DISCONNECTED);
     _initialized = true;
 
-    Serial.println(F("[MQTTManager] Initialized"));
+    FLM_LOG_INFO("MQTT", "ready");
     return ErrorCode::ERR_NONE;
 }
 
@@ -106,8 +106,7 @@ ErrorCode MQTTManager::connect() {
 
     MQTTConfig& config = ConfigManager::getInstance().getMQTTConfig();
 
-    Serial.printf("[MQTTManager] Connecting to %s:%d...\n",
-                  config.server.c_str(), config.port);
+    FLM_LOG_INFO("MQTT", "connecting %s:%u", config.server.c_str(), (unsigned)config.port);
     setState(MQTTState::CONNECTING);
     _lastConnectAttempt = millis();
 
@@ -134,13 +133,18 @@ ErrorCode MQTTManager::connect() {
 
     if (connected) {
         setState(MQTTState::CONNECTED);
-        Serial.println(F("[MQTTManager] Connected!"));
+        _reconnectDelayMs = MQTT_RECONNECT_INTERVAL;
+        FLM_LOG_INFO("MQTT", "connected");
         publishStatus();
         subscribe("command");
         return ErrorCode::ERR_NONE;
     }
 
     setState(MQTTState::DISCONNECTED);
+    uint32_t next = _reconnectDelayMs * 2;
+    if (next < MQTT_RECONNECT_INTERVAL) next = MQTT_RECONNECT_INTERVAL;
+    if (next > MQTT_RECONNECT_MAX_MS) next = MQTT_RECONNECT_MAX_MS;
+    _reconnectDelayMs = next;
 
     int st = _mqttClient.state();
     const char* reason = "unknown";
@@ -168,20 +172,20 @@ void MQTTManager::disconnect() {
         _mqttClient.disconnect();
     }
     setState(MQTTState::DISCONNECTED);
-    Serial.println(F("[MQTTManager] Disconnected"));
+    FLM_LOG_INFO("MQTT", "disconnected");
 }
 
 void MQTTManager::prepareForOTA() {
     if (_state == MQTTState::DISABLED) return;
     disconnect();
     _mqttClient.setBufferSize(128);
-    Serial.println(F("[MQTTManager] Prepared for OTA (MQTT disconnected, small buffer)"));
+    FLM_LOG_INFO("MQTT", "prepared for OTA");
 }
 
 void MQTTManager::restoreAfterOTA() {
     if (_state == MQTTState::DISABLED) return;
     _mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
-    Serial.println(F("[MQTTManager] Restored after OTA abort"));
+    FLM_LOG_INFO("MQTT", "restored after OTA abort");
 }
 
 bool MQTTManager::isConnected() {
@@ -206,13 +210,13 @@ void MQTTManager::checkConnection() {
     if (_state == MQTTState::DISABLED) return;
 
     if (_state == MQTTState::CONNECTED && !_mqttClient.connected()) {
-        Serial.println(F("[MQTTManager] Connection lost"));
+        FLM_LOG_WARN("MQTT", "connection lost");
         setState(MQTTState::DISCONNECTED);
         ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_DISCONNECTED);
     }
 
     if (_state == MQTTState::DISCONNECTED) {
-        if (millis() - _lastConnectAttempt > MQTT_RECONNECT_INTERVAL) {
+        if ((unsigned long)(millis() - _lastConnectAttempt) >= _reconnectDelayMs) {
             connect();
         }
     }
@@ -238,7 +242,7 @@ bool MQTTManager::publish(const String& subtopic, const String& payload, bool re
     if (success) {
         _publishCount++;
         if (ConfigManager::getInstance().getSystemConfig().debugEnabled) {
-            Serial.printf("[MQTTManager] Published to %s\n", fullTopic.c_str());
+            FLM_LOG_DEBUG("MQTT", "pub %s", fullTopic.c_str());
         }
     } else {
         _publishErrors++;

@@ -23,6 +23,10 @@
 | Fast blink (5Hz) | Connecting | Wait for connection |
 | Off | No power / crash | Check power supply |
 
+### Serial log format
+
+Lines use `[FLM][LEVEL][Module] message` (e.g. `[FLM][I][WiFi]` = INFO). Do not share serial logs if they might expose your LAN layout; AP/WiFi passwords are **not** printed.
+
 ### Serial Monitor Check
 
 Connect via serial (115200 baud) to see debug output:
@@ -43,8 +47,10 @@ curl http://<device-ip>/api/status
 
 Check for:
 - `freeHeap` > 10000 (memory OK)
-- `sensor.valid` = true (sensor working)
-- `wifi.connected` = true (network OK)
+- `level.valid` / `sensorOk` (sensor working)
+- `connection.wifi` = true (network OK)
+
+If REST config returns **503** / `CONFIG_LOCKED`, another client is saving config — retry. **507** / `FS_FULL`: free LittleFS space.
 
 ---
 

@@ -9,6 +9,8 @@
  * - OTA (Over-The-Air) update support
  * - Connection status monitoring
  * - mDNS support for easy discovery
+ *
+ * @note Call `loop()` from main. OTA prepare callback may tear down HTTP/MQTT/WS.
  * 
  * @author FluidLevelMonitor Project
  * @version 1.0.0

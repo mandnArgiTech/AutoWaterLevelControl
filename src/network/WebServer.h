@@ -23,6 +23,10 @@
 #include "../sensor/ISensor.h"
 #include "../tank/TankCalculator.h"
 
+/** OTA hooks: prepare frees MQTT/WS (and optionally HTTP for Arduino OTA path). */
+typedef void (*FlmOtaPrepareFn)();
+typedef void (*FlmOtaRestoreFn)();
+
 // =============================================================================
 // SECTION 1: WEB SERVER CLASS
 // =============================================================================
@@ -44,6 +48,9 @@
  * - POST /api/errors/clear - Clear errors
  * - POST /api/restart      - Restart device
  * - POST /api/reset        - Factory reset
+ * - POST /api/update       - Web firmware OTA (see WebServerFirmware.cpp)
+ *
+ * @note Implementation split: WebServer.cpp (core), WebServerApi.cpp, WebServerFirmware.cpp.
  */
 class WebServerManager {
 public:
@@ -51,8 +58,11 @@ public:
      * @brief Constructor with dependencies
      * @param sensor Reference to ISensor (sensor-agnostic)
      * @param calculator Reference to TankCalculator
+     * @param otaPrepare Called before firmware upload (stop MQTT/WS)
+     * @param otaRestore Called on upload abort/failure
      */
-    WebServerManager(ISensor& sensor, TankCalculator& calculator);
+    WebServerManager(ISensor& sensor, TankCalculator& calculator,
+                     FlmOtaPrepareFn otaPrepare, FlmOtaRestoreFn otaRestore);
     
     /**
      * @brief Initialize web server
@@ -129,6 +139,8 @@ private:
     // Helper methods
     void sendJson(int code, const String& json);
     void sendError(int code, const String& message);
+    /** Stable API error: { "success":false, "code": "...", "message": "..." } */
+    void sendApiFailure(int httpCode, const char* codeStr, const String& message);
     void sendSuccess(const String& message);
     void addCorsHeaders();
     bool checkAuth();
@@ -140,6 +152,8 @@ private:
     bool _running;                  ///< Server running flag
     uint32_t _requestCount;         ///< Request counter
     bool _firmwareUploadOk;         ///< Last web OTA result
+    FlmOtaPrepareFn _otaPrepare;
+    FlmOtaRestoreFn _otaRestore;
 };
 
 #endif // WEB_SERVER_H

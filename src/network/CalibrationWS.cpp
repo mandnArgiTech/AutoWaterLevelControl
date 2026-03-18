@@ -7,6 +7,11 @@
  */
 
 #include "CalibrationWS.h"
+#include "../utils/Log.h"
+
+#ifndef FLM_MAX_WS_JSON_BYTES
+#define FLM_MAX_WS_JSON_BYTES 512
+#endif
 
 // Static instance for callback
 CalibrationWebSocket* CalibrationWebSocket::_instance = nullptr;
@@ -39,7 +44,7 @@ CalibrationWebSocket::CalibrationWebSocket(ISensor& sensor, TankCalculator& calc
  * @return true if successful
  */
 bool CalibrationWebSocket::begin() {
-    Serial.println(F("[CalibrationWS] Initializing..."));
+    FLM_LOG_INFO("CalWS", "Initializing...");
     
     // Step 1: Start WebSocket server
     _wsServer.begin();
@@ -48,7 +53,7 @@ bool CalibrationWebSocket::begin() {
     _wsServer.onEvent(webSocketEventCallback);
     
     _initialized = true;
-    Serial.printf("[CalibrationWS] WebSocket server started on port %d\n", CALIBRATION_WS_PORT);
+    FLM_LOG_INFO("CalWS", "port %d", CALIBRATION_WS_PORT);
     
     return true;
 }
@@ -65,7 +70,7 @@ void CalibrationWebSocket::stopForOTA() {
     _wsServer.close();
     _suspendedForOTA = true;
     _clientCount = 0;
-    Serial.println(F("[CalibrationWS] Stopped for OTA"));
+    FLM_LOG_INFO("CalWS", "stopped for OTA");
 }
 
 void CalibrationWebSocket::resumeAfterOTA() {
@@ -73,7 +78,7 @@ void CalibrationWebSocket::resumeAfterOTA() {
     _wsServer.begin();
     _wsServer.onEvent(webSocketEventCallback);
     _suspendedForOTA = false;
-    Serial.println(F("[CalibrationWS] Resumed"));
+    FLM_LOG_INFO("CalWS", "resumed");
 }
 
 void CalibrationWebSocket::loop() {
@@ -118,7 +123,7 @@ void CalibrationWebSocket::onWebSocketEvent(uint8_t num, WStype_t type,
             
         case WStype_CONNECTED:
             {
-                Serial.printf("[CalibrationWS] Client %u connected\n", num);
+                FLM_LOG_DEBUG("CalWS", "client %u connected", (unsigned)num);
                 _clientCount++;
                 
                 // Send initial status
@@ -143,11 +148,15 @@ void CalibrationWebSocket::onWebSocketEvent(uint8_t num, WStype_t type,
  * @brief Handle incoming commands from client
  */
 void CalibrationWebSocket::handleCommand(uint8_t num, const uint8_t* payload, size_t length) {
+    if (length > FLM_MAX_WS_JSON_BYTES) {
+        FLM_LOG_WARN("CalWS", "command too large (%u)", (unsigned)length);
+        return;
+    }
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload, length);
-    
+
     if (error) {
-        Serial.println(F("[CalibrationWS] JSON parse error"));
+        FLM_LOG_WARN("CalWS", "JSON parse error");
         return;
     }
     
@@ -168,32 +177,39 @@ void CalibrationWebSocket::handleCommand(uint8_t num, const uint8_t* payload, si
         
         // Confirm with status
         broadcastJson(getStatusJson());
-        Serial.printf("[CalibrationWS] Offset set to %.1f cm\n", offsetCm);
+        FLM_LOG_INFO("CalWS", "offset %.1f cm", offsetCm);
         
     } else if (cmd == "saveCalibration") {
-        // Save calibration to config
         SensorConfig& sensorConfig = ConfigManager::getInstance().getSensorConfig();
         sensorConfig.offsetMm = _sensor.getCalibrationOffset();
-        
-        ErrorCode result = ConfigManager::getInstance().saveConfig();
-        
-        char buf[96];
+
+        char buf[128];
         JsonDocument response;
         response["type"] = "saveResult";
-        response["success"] = (result == ErrorCode::ERR_NONE);
+        if (!ConfigManager::getInstance().tryLockForConfigWrite()) {
+            response["success"] = false;
+            response["code"] = "CONFIG_LOCKED";
+        } else {
+            ErrorCode result = ConfigManager::getInstance().saveConfig();
+            ConfigManager::getInstance().unlockConfigWrite();
+            response["success"] = (result == ErrorCode::ERR_NONE);
+            if (result != ErrorCode::ERR_NONE) {
+                response["code"] = "SAVE_FAILED";
+            }
+        }
         response["offsetCm"] = sensorConfig.offsetMm / 10.0f;
         size_t n = serializeJson(response, buf, sizeof(buf));
         if (n > 0 && n < sizeof(buf)) {
             _wsServer.sendTXT(num, (uint8_t*)buf, n);
         }
-        
-        Serial.printf("[CalibrationWS] Calibration saved: %.1f cm\n", sensorConfig.offsetMm / 10.0f);
+        FLM_LOG_INFO("CalWS", "calibration save ok=%d offset %.1f cm",
+                     (int)(response["success"].as<bool>()), sensorConfig.offsetMm / 10.0f);
         
     } else if (cmd == "resetOffset") {
         // Reset offset to zero
         setCalibrationOffset(0);
         broadcastJson(getStatusJson());
-        Serial.println(F("[CalibrationWS] Offset reset to 0"));
+        FLM_LOG_DEBUG("CalWS", "offset reset");
     }
 }
 

@@ -22,6 +22,7 @@
 
 #define MQTT_BUFFER_SIZE        512
 #define MQTT_RECONNECT_INTERVAL 5000
+#define MQTT_RECONNECT_MAX_MS   120000u
 #ifndef MQTT_KEEPALIVE
 #define MQTT_KEEPALIVE          60
 #endif
@@ -88,6 +89,7 @@ private:
     MQTTMessageCallback _messageCallback;
     MQTTStateCallback _stateCallback;
     unsigned long _lastConnectAttempt;
+    uint32_t _reconnectDelayMs;
     uint32_t _publishCount;
     uint32_t _publishErrors;
 

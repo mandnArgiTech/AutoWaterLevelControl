@@ -22,6 +22,8 @@ FluidLevelMonitor measures water level in your tank and reports it as:
 
 The system can publish data to MQTT brokers for home automation integration (Home Assistant, Node-RED, etc.).
 
+**Serial (115200):** Optional status lines use prefix `[FLM][level][module]`. When asking for support, avoid pasting logs that include your full IP layout; passwords are not printed by design.
+
 ---
 
 ## Hardware Setup

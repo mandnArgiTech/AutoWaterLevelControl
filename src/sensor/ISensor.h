@@ -9,7 +9,9 @@
  * - Infrared (IR) sensors
  * - Laser/LIDAR sensors
  * - Time-of-Flight (ToF) sensors
- * 
+ *
+ * @note Call `begin()` once after construction. Implementations are not thread-safe;
+ *       only invoke from the main `loop()` on ESP8266.
  * @author FluidLevelMonitor Project
  * @version 1.0.0
  */

@@ -94,12 +94,17 @@ FluidLevelMonitor/
 │   ├── network/
 │   │   ├── WiFiManager.h/cpp    # WiFi, AP mode, OTA
 │   │   ├── MQTTManager.h/cpp    # MQTT publishing
-│   │   ├── WebServer.h/cpp      # REST API, web interface
-│   │   └── CalibrationWS.h/cpp  # WebSocket for calibration
+│   │   ├── WebServer.h
+│   │   ├── WebServer.cpp        # Core HTTP + static files
+│   │   ├── WebServerApi.cpp     # REST handlers
+│   │   ├── WebServerFirmware.cpp # Web OTA upload
+│   │   └── CalibrationWS.h/cpp  # WebSocket calibration
 │   │
 │   └── utils/
-│       ├── ErrorHandler.h/cpp   # Error codes and logging
-│       └── TimeManager.h/cpp    # NTP time synchronization
+│       ├── ErrorHandler.h/cpp   # Error codes + LittleFS descriptions (cached lookup)
+│       ├── Log.h/cpp            # Structured Serial logging
+│       ├── FlmTime.h            # millis()-safe intervals
+│       └── TimeManager.h/cpp    # NTP
 │
 ├── data/                        # LittleFS filesystem
 │   ├── config.json              # Default configuration
@@ -115,6 +120,9 @@ FluidLevelMonitor/
 │   ├── USER_GUIDE.md
 │   ├── DEVELOPER_GUIDE.md
 │   ├── API_REFERENCE.md
+│   ├── ARCHITECTURE.md
+│   ├── CODE_STYLE.md
+│   ├── MANUAL_TEST_MATRIX.md
 │   └── SENSOR_GUIDE.md
 │
 └── platformio.ini               # PlatformIO configuration
@@ -137,10 +145,28 @@ WiFiConfig& wifi = config.getWiFiConfig();
 TankConfig& tank = config.getTankConfig();
 SensorConfig& sensor = config.getSensorConfig();
 
-// Save/load
+// Save/load (see concurrency below)
 config.saveConfig();
 config.loadConfig();
 ```
+
+**Config I/O:** Saves go to `/config.json.new`, then replace `config.json` (atomic). Backup in `config.bak`. If `config.json` fails to parse on boot, backup is restored once.
+
+**Concurrency:** REST full/section POST uses `tryLockForConfigWrite()` for the whole transaction. `saveConfig()` runs under that lock or acquires it for standalone saves (e.g. calibration WS). Overlapping writes return HTTP 503 / WebSocket `CONFIG_LOCKED`.
+
+**Limits:** POST body max `FLM_MAX_CONFIG_JSON_BYTES` (12288). Numeric fields clamped in `validateConfig()`.
+
+### Logging (`Log.h` / `Log.cpp`)
+
+Use `FLM_LOG_INFO("WiFi", "…")`, `FLM_LOG_WARN`, `FLM_LOG_ERROR`. Debug/trace require `-D FLM_LOG_VERBOSE` in `build_flags`. Do **not** log WiFi/MQTT passwords.
+
+### WebServer (split compilation units)
+
+- `WebServer.cpp` — routes, static files, JSON helpers
+- `WebServerApi.cpp` — REST handlers
+- `WebServerFirmware.cpp` — multipart `/api/update`
+
+`WebServerManager` takes OTA function pointers: `WebServerManager(sensor, calculator, prepareFn, restoreFn)`.
 
 ### ISensor (Interface)
 
@@ -443,14 +469,21 @@ if (result != ErrorCode::ERR_NONE) {
 
 ## Testing
 
-### Serial Monitor Testing
+### Static analysis
 
-1. Enable debug in config: `debugEnabled: true`
-2. Monitor output: `pio device monitor`
-3. Watch for:
-   - Initialization messages
-   - Sensor readings
-   - Error messages
+```bash
+pio check -e nodemcuv2
+```
+
+### Manual regression
+
+See [MANUAL_TEST_MATRIX.md](MANUAL_TEST_MATRIX.md).
+
+### Serial monitor
+
+1. Optional: `debugEnabled: true` for periodic status
+2. `pio device monitor` @ 115200
+3. Lines look like `[FLM][I][WiFi] ...` (level + module)
 
 ### API Testing
 

@@ -8,6 +8,7 @@
 
 #include "WiFiManager.h"
 #include "../version.h"
+#include "../utils/Log.h"
 
 // =============================================================================
 // SECTION 1: SINGLETON INSTANCE
@@ -51,12 +52,10 @@ WiFiManager::WiFiManager()
  * @return ErrorCode indicating success or failure
  */
 ErrorCode WiFiManager::begin() {
-    Serial.println(F("[WiFiManager] Initializing..."));
+    FLM_LOG_INFO("WiFi", "Initializing...");
     
     // Step 1: Print device info
-    Serial.printf("[WiFiManager] Device ID: %s\n", getDeviceId().c_str());
-    Serial.printf("[WiFiManager] AP SSID: %s\n", getAPSSID().c_str());
-    Serial.printf("[WiFiManager] MAC: %s\n", getMAC().c_str());
+    FLM_LOG_DEBUG("WiFi", "device %s AP %s", getDeviceId().c_str(), getAPSSID().c_str());
     
     // Step 2: Set WiFi mode
     WiFi.mode(WIFI_STA);
@@ -69,7 +68,7 @@ ErrorCode WiFiManager::begin() {
     
     // Step 4: Check if forced AP mode or no SSID configured
     if (config.apMode || config.ssid.length() == 0) {
-        Serial.println(F("[WiFiManager] No WiFi configured, starting AP mode"));
+        FLM_LOG_INFO("WiFi", "no STA config — AP mode");
         ErrorCode result = startAP();
         if (result != ErrorCode::ERR_NONE) {
             return result;
@@ -79,7 +78,7 @@ ErrorCode WiFiManager::begin() {
         ErrorCode result = connect();
         if (result != ErrorCode::ERR_NONE) {
             // Fall back to AP mode if connection fails
-            Serial.println(F("[WiFiManager] Connection failed, starting AP mode"));
+            FLM_LOG_WARN("WiFi", "STA failed — AP mode");
             startAP();
         }
     }
@@ -88,7 +87,7 @@ ErrorCode WiFiManager::begin() {
     setupOTA();
     
     _initialized = true;
-    Serial.println(F("[WiFiManager] Initialized"));
+    FLM_LOG_INFO("WiFi", "ready");
     
     return ErrorCode::ERR_NONE;
 }
@@ -106,11 +105,11 @@ ErrorCode WiFiManager::connect() {
     
     // Step 1: Check if SSID is configured
     if (config.ssid.length() == 0) {
-        Serial.println(F("[WiFiManager] No SSID configured"));
+        FLM_LOG_WARN("WiFi", "no SSID");
         return ErrorHandler::getInstance().logError(ErrorCode::ERR_WIFI_NO_SSID);
     }
     
-    Serial.printf("[WiFiManager] Connecting to: %s\n", config.ssid.c_str());
+    FLM_LOG_INFO("WiFi", "connecting to %s", config.ssid.c_str());
     setState(WifiMgrState::CONNECTING);
     
     // Step 2: Stop AP if running - properly stop DNS server first
@@ -146,9 +145,7 @@ ErrorCode WiFiManager::connect() {
         setState(WifiMgrState::CONNECTED);
         _reconnectCount = 0;
         
-        Serial.println(F("[WiFiManager] Connected!"));
-        Serial.printf("  IP: %s\n", getIP().c_str());
-        Serial.printf("  RSSI: %d dBm (%d%%)\n", getRSSI(), getSignalQuality());
+        FLM_LOG_INFO("WiFi", "connected IP %s RSSI %d", getIP().c_str(), getRSSI());
         
         // Step 7: Setup mDNS
         setupMDNS();
@@ -168,7 +165,7 @@ ErrorCode WiFiManager::connect() {
  * @brief Disconnect from current network
  */
 void WiFiManager::disconnect() {
-    Serial.println(F("[WiFiManager] Disconnecting..."));
+    FLM_LOG_INFO("WiFi", "disconnecting");
     WiFi.disconnect();
     setState(WifiMgrState::DISCONNECTED);
 }
@@ -185,8 +182,7 @@ ErrorCode WiFiManager::startAP() {
     String apSSID = getAPSSID();
     WiFiConfig& config = ConfigManager::getInstance().getWiFiConfig();
     
-    Serial.printf("[WiFiManager] Starting AP: %s\n", apSSID.c_str());
-    Serial.printf("[WiFiManager] AP IP: %s\n", AP_IP.toString().c_str());
+    FLM_LOG_INFO("WiFi", "AP %s @ %s", apSSID.c_str(), AP_IP.toString().c_str());
     
     // Step 1: Set mode to AP+STA (allows scanning while in AP mode)
     WiFi.mode(WIFI_AP_STA);
@@ -211,14 +207,9 @@ ErrorCode WiFiManager::startAP() {
     
     setState(WifiMgrState::AP_MODE);
     
-    Serial.println(F("[WiFiManager] AP Started"));
-    Serial.printf("  Connect to WiFi: %s\n", apSSID.c_str());
-    if (config.apPassword.length() >= 8) {
-        Serial.printf("  Password: %s\n", config.apPassword.c_str());
-    } else {
-        Serial.println(F("  Password: (open network)"));
-    }
-    Serial.printf("  Then open: http://%s\n", AP_IP.toString().c_str());
+    FLM_LOG_INFO("WiFi", "AP %s — http://%s (pwd %s)", apSSID.c_str(),
+                 AP_IP.toString().c_str(),
+                 config.apPassword.length() >= 8 ? "set (not logged)" : "open");
     
     // Step 5: Setup mDNS for AP mode
     setupMDNS();
@@ -230,7 +221,7 @@ ErrorCode WiFiManager::startAP() {
  * @brief Stop Access Point mode
  */
 void WiFiManager::stopAP() {
-    Serial.println(F("[WiFiManager] Stopping AP..."));
+    FLM_LOG_INFO("WiFi", "stopping AP");
     
     if (_dnsServer) {
         delete _dnsServer;
@@ -255,7 +246,7 @@ void WiFiManager::setupCaptivePortal() {
     _dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
     _dnsServer->start(DNS_PORT, "*", AP_IP);
     
-    Serial.println(F("[WiFiManager] Captive portal DNS started"));
+    FLM_LOG_DEBUG("WiFi", "captive DNS");
 }
 
 // =============================================================================
@@ -276,36 +267,37 @@ void WiFiManager::setupOTA() {
     ArduinoOTA.onStart([this]() {
         _otaInProgress = true;
         const char* type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
-        Serial.printf("[OTA] Start updating %s — freeing heap...\n", type);
+        FLM_LOG_INFO("OTA", "start %s", type);
         if (_otaPrepareCallback) {
             _otaPrepareCallback();
         }
-        Serial.printf("[OTA] Free heap before transfer: %u bytes\n", (unsigned)ESP.getFreeHeap());
+        FLM_LOG_DEBUG("OTA", "heap %u", (unsigned)ESP.getFreeHeap());
     });
     
     ArduinoOTA.onEnd([this]() {
         _otaInProgress = false;
-        Serial.println(F("\n[OTA] Update complete!"));
+        FLM_LOG_INFO("OTA", "complete");
     });
     
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
         static int lastPercent = -1;
         int percent = (progress / (total / 100));
         if (percent != lastPercent && percent % 10 == 0) {
-            Serial.printf("[OTA] Progress: %u%%\n", percent);
+            FLM_LOG_DEBUG("OTA", "%u%%", (unsigned)percent);
             lastPercent = percent;
         }
     });
     
     ArduinoOTA.onError([this](ota_error_t error) {
         _otaInProgress = false;
-        Serial.printf("[OTA] Error[%u]: ", error);
+        FLM_LOG_ERROR("OTA", "error %u", (unsigned)error);
         switch (error) {
-            case OTA_AUTH_ERROR:    Serial.println(F("Auth Failed")); break;
-            case OTA_BEGIN_ERROR:   Serial.println(F("Begin Failed")); break;
-            case OTA_CONNECT_ERROR: Serial.println(F("Connect Failed")); break;
-            case OTA_RECEIVE_ERROR: Serial.println(F("Receive Failed")); break;
-            case OTA_END_ERROR:     Serial.println(F("End Failed")); break;
+            case OTA_AUTH_ERROR:
+            case OTA_BEGIN_ERROR:
+            case OTA_CONNECT_ERROR:
+            case OTA_RECEIVE_ERROR:
+            case OTA_END_ERROR:
+                break;
         }
         if (_otaErrorCallback) {
             _otaErrorCallback();
@@ -314,7 +306,7 @@ void WiFiManager::setupOTA() {
     
     // Step 4: Start OTA
     ArduinoOTA.begin();
-    Serial.println(F("[WiFiManager] OTA initialized"));
+    FLM_LOG_INFO("WiFi", "OTA ready");
 }
 
 // =============================================================================
@@ -353,7 +345,7 @@ void WiFiManager::checkConnection() {
     
     // Check if connection lost
     if (_state == WifiMgrState::CONNECTED && !WiFi.isConnected()) {
-        Serial.println(F("[WiFiManager] Connection lost"));
+        FLM_LOG_WARN("WiFi", "connection lost");
         setState(WifiMgrState::DISCONNECTED);
         ErrorHandler::getInstance().logError(ErrorCode::ERR_WIFI_DISCONNECTED);
     }
@@ -362,11 +354,11 @@ void WiFiManager::checkConnection() {
     if (_state == WifiMgrState::DISCONNECTED || _state == WifiMgrState::CONNECTION_FAILED) {
         if (millis() - _lastConnectAttempt > _reconnectInterval) {
             if (_reconnectCount < MAX_RECONNECT_ATTEMPTS) {
-                Serial.println(F("[WiFiManager] Attempting reconnection..."));
+                FLM_LOG_INFO("WiFi", "reconnecting...");
                 connect();
             } else {
                 // Max reconnection attempts reached, switch to AP mode
-                Serial.println(F("[WiFiManager] Max reconnect attempts, switching to AP"));
+                FLM_LOG_WARN("WiFi", "max retries — AP mode");
                 startAP();
                 _reconnectCount = 0;
             }
@@ -386,9 +378,9 @@ void WiFiManager::setupMDNS() {
     
     if (MDNS.begin(config.hostname.c_str())) {
         MDNS.addService("http", "tcp", ConfigManager::getInstance().getSystemConfig().webPort);
-        Serial.printf("[WiFiManager] mDNS: http://%s.local\n", config.hostname.c_str());
+        FLM_LOG_INFO("WiFi", "mDNS http://%s.local", config.hostname.c_str());
     } else {
-        Serial.println(F("[WiFiManager] mDNS setup failed"));
+        FLM_LOG_WARN("WiFi", "mDNS failed");
     }
 }
 
@@ -510,7 +502,7 @@ String WiFiManager::getSSID() const {
  * @return JSON array of networks
  */
 String WiFiManager::scanNetworks() {
-    Serial.println(F("[WiFiManager] Scanning networks..."));
+    FLM_LOG_DEBUG("WiFi", "scanning...");
     
     int numNetworks = WiFi.scanNetworks();
     const int maxNet = 10;
@@ -520,6 +512,7 @@ String WiFiManager::scanNetworks() {
     JsonArray networks = doc["networks"].to<JsonArray>();
 
     for (int i = 0; i < n; i++) {
+        yield();
         JsonObject network = networks.add<JsonObject>();
         network["ssid"] = WiFi.SSID(i);
         network["rssi"] = WiFi.RSSI(i);

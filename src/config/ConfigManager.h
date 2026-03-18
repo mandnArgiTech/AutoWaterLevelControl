@@ -29,6 +29,10 @@
 
 #define CONFIG_FILE         "/config.json"
 #define CONFIG_BACKUP_FILE  "/config.bak"
+#define CONFIG_TEMP_FILE    "/config.json.new"
+
+/** Max JSON body size for POST /api/config (bytes). */
+#define FLM_MAX_CONFIG_JSON_BYTES 12288
 
 // =============================================================================
 // SECTION 2: DEFAULT VALUES
@@ -230,8 +234,17 @@ public:
     ErrorCode loadConfig();
     
     /**
-     * @brief Save current configuration to LittleFS
-     * @return ErrorCode indicating success or failure
+     * @brief Begin exclusive config update (REST full POST). Pair with unlockConfigWrite().
+     * @return false if another transaction is active
+     */
+    bool tryLockForConfigWrite();
+
+    /** End exclusive config transaction. */
+    void unlockConfigWrite();
+
+    /**
+     * @brief Save current configuration to LittleFS (atomic replace). If a transaction lock
+     *        is held, save runs under that lock; otherwise acquires lock for this call only.
      */
     ErrorCode saveConfig();
     
@@ -350,6 +363,9 @@ private:
     void serializeTankConfig(JsonObject& obj) const;
     void serializeSensorConfig(JsonObject& obj) const;
     void serializeSystemConfig(JsonObject& obj) const;
+
+    ErrorCode saveConfigAtomic();
+    void applyNumericClamps();
     
     // Member variables
     bool _initialized;          ///< Initialization flag
@@ -360,6 +376,8 @@ private:
     TankConfig _tankConfig;     ///< Tank configuration
     SensorConfig _sensorConfig; ///< Sensor configuration
     SystemConfig _systemConfig; ///< System configuration
+
+    volatile bool _configWriteLocked;  ///< Serialize HTTP full config POST vs other saves
 };
 
 #endif // CONFIG_MANAGER_H

@@ -34,6 +34,8 @@
 #include "network/MQTTManager.h"
 #include "network/WebServer.h"
 #include "network/CalibrationWS.h"
+#include "utils/Log.h"
+#include "utils/FlmTime.h"
 
 // =============================================================================
 // Global objects
@@ -82,8 +84,11 @@ void setup() {
 }
 
 // =============================================================================
-// Initialization
+// Initialization (order is required for stable boot)
 // =============================================================================
+// 1. ConfigManager + LittleFS   2. ErrorHandler   3. Sensor + TankCalculator
+// 4. WiFiManager   5. TimeManager   6. MQTTManager   7. Web + Calibration WS
+// 8. OTA callbacks on WiFiManager   9. First sensor read
 
 void initializeSystem() {
     Serial.println(F("\n========== System Initialization ==========\n"));
@@ -170,7 +175,7 @@ void initializeSystem() {
 
     // --- Web Server ---
     Serial.println(F("\n>>> Web Server..."));
-    webServer = new WebServerManager(*activeSensor, *calculator);
+    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA, fluidRestoreAfterOTA);
     if (webServer) webServer->begin();
 
     // --- Calibration WebSocket ---
@@ -230,26 +235,23 @@ void processLoop() {
     // Sensor reading (skip during calibration)
     if (!calibrationWS || !calibrationWS->isActive()) {
         uint32_t interval = ConfigManager::getInstance().getSensorConfig().readInterval;
-        if (millis() - lastSensorRead >= interval) {
+        if (flmElapsedMs(lastSensorRead, interval)) {
             readSensor();
-            lastSensorRead = millis();
         }
     }
 
     // MQTT publish
     MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
     if (mqttCfg.enabled && MQTTManager::getInstance().isConnected()) {
-        if (millis() - lastMQTTPublish >= mqttCfg.publishInterval) {
+        if (flmElapsedMs(lastMQTTPublish, mqttCfg.publishInterval)) {
             publishMQTT();
-            lastMQTTPublish = millis();
         }
     }
 
     // Serial status
     if (ConfigManager::getInstance().getSystemConfig().debugEnabled) {
-        if (millis() - lastStatusPrint >= STATUS_PRINT_INTERVAL) {
+        if (flmElapsedMs(lastStatusPrint, STATUS_PRINT_INTERVAL)) {
             printStatus();
-            lastStatusPrint = millis();
         }
     }
 
@@ -333,7 +335,7 @@ void printStatus() {
 // =============================================================================
 
 void handleWiFiStateChange(WifiMgrState state) {
-    Serial.printf("[Main] WiFi → %s\n", WiFiManager::stateToString(state).c_str());
+    FLM_LOG_INFO("Main", "WiFi -> %s", WiFiManager::stateToString(state).c_str());
 
     if (state == WifiMgrState::CONNECTED) {
         TimeManager::getInstance().syncTime();
@@ -344,7 +346,7 @@ void handleWiFiStateChange(WifiMgrState state) {
 }
 
 void handleMQTTMessage(const String& topic, const String& payload) {
-    Serial.printf("[Main] MQTT msg: %s = %s\n", topic.c_str(), payload.c_str());
+    FLM_LOG_DEBUG("Main", "MQTT %s", topic.c_str());
 
     if (topic.endsWith("/command")) {
         JsonDocument doc;

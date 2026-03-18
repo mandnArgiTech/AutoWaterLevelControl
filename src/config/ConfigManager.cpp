@@ -7,6 +7,7 @@
  */
 
 #include "ConfigManager.h"
+#include "../utils/Log.h"
 
 // =============================================================================
 // SECTION 1: SINGLETON INSTANCE
@@ -30,7 +31,8 @@ ConfigManager& ConfigManager::getInstance() {
  */
 ConfigManager::ConfigManager() 
     : _initialized(false)
-    , _fsMounted(false) {
+    , _fsMounted(false)
+    , _configWriteLocked(false) {
     // Initialize with default values
     resetToDefaults();
 }
@@ -44,7 +46,7 @@ ConfigManager::ConfigManager()
  * @return ErrorCode indicating success or failure
  */
 ErrorCode ConfigManager::begin() {
-    Serial.println(F("[ConfigManager] Initializing..."));
+    FLM_LOG_INFO("Cfg", "Initializing...");
     
     // Step 1: Initialize filesystem
     if (!initFilesystem()) {
@@ -54,14 +56,14 @@ ErrorCode ConfigManager::begin() {
     // Step 2: Load configuration from file
     ErrorCode result = loadConfig();
     if (result != ErrorCode::ERR_NONE && result != ErrorCode::ERR_CONFIG_READ) {
-        Serial.println(F("[ConfigManager] Using default configuration"));
+        FLM_LOG_WARN("Cfg", "using defaults after init issue");
     }
     
     // Step 3: Validate configuration
     validateConfig();
     
     _initialized = true;
-    Serial.println(F("[ConfigManager] Initialized successfully"));
+    FLM_LOG_INFO("Cfg", "initialized");
     
     return ErrorCode::ERR_NONE;
 }
@@ -71,21 +73,21 @@ ErrorCode ConfigManager::begin() {
  * @return true if successful
  */
 bool ConfigManager::initFilesystem() {
-    Serial.println(F("[ConfigManager] Mounting LittleFS..."));
+    FLM_LOG_INFO("Cfg", "Mounting LittleFS...");
     
     // Step 1: Attempt to mount filesystem
     if (!LittleFS.begin()) {
-        Serial.println(F("[ConfigManager] Mount failed, formatting..."));
+        FLM_LOG_WARN("Cfg", "mount failed, formatting");
         
         // Step 2: If mount fails, try formatting
         if (!LittleFS.format()) {
-            Serial.println(F("[ConfigManager] Format failed!"));
+            FLM_LOG_ERROR("Cfg", "format failed");
             return false;
         }
         
         // Step 3: Try mounting again after format
         if (!LittleFS.begin()) {
-            Serial.println(F("[ConfigManager] Mount failed after format!"));
+            FLM_LOG_ERROR("Cfg", "mount failed after format");
             return false;
         }
     }
@@ -95,7 +97,7 @@ bool ConfigManager::initFilesystem() {
     // Step 4: Print filesystem info
     size_t total, used;
     getFilesystemInfo(total, used);
-    Serial.printf("[ConfigManager] FS: %u bytes used / %u bytes total\n", used, total);
+    FLM_LOG_INFO("Cfg", "FS %u / %u bytes", (unsigned)used, (unsigned)total);
     
     return true;
 }
@@ -114,7 +116,7 @@ void ConfigManager::resetToDefaults() {
     setDefaultSensorConfig();
     setDefaultSystemConfig();
     
-    Serial.println(F("[ConfigManager] Reset to defaults"));
+    FLM_LOG_INFO("Cfg", "reset to defaults");
 }
 
 void ConfigManager::setDefaultWiFiConfig() {
@@ -197,7 +199,7 @@ void ConfigManager::setDefaultSystemConfig() {
 ErrorCode ConfigManager::loadConfig() {
     // Step 1: Check if file exists
     if (!LittleFS.exists(CONFIG_FILE)) {
-        Serial.println(F("[ConfigManager] Config file not found, using defaults"));
+        FLM_LOG_INFO("Cfg", "no config file — defaults");
         return ErrorCode::ERR_CONFIG_READ;
     }
     
@@ -211,11 +213,33 @@ ErrorCode ConfigManager::loadConfig() {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, file);
     file.close();
-    
+
     if (error) {
-        Serial.print(F("[ConfigManager] JSON parse error: "));
-        Serial.println(error.c_str());
-        return ErrorHandler::getInstance().logError(ErrorCode::ERR_CONFIG_PARSE);
+        FLM_LOG_WARN("Cfg", "config parse error, trying backup");
+        if (LittleFS.exists(CONFIG_BACKUP_FILE)) {
+            File src = LittleFS.open(CONFIG_BACKUP_FILE, "r");
+            File dst = LittleFS.open(CONFIG_FILE, "w");
+            if (src && dst) {
+                uint8_t b[64];
+                while (src.available()) {
+                    size_t n = src.read(b, sizeof(b));
+                    dst.write(b, n);
+                    yield();
+                }
+            }
+            if (src) src.close();
+            if (dst) dst.close();
+            file = LittleFS.open(CONFIG_FILE, "r");
+            if (file) {
+                error = deserializeJson(doc, file);
+                file.close();
+            }
+        }
+        if (error) {
+            FLM_LOG_ERROR("Cfg", "config restore failed: %s", error.c_str());
+            return ErrorHandler::getInstance().logError(ErrorCode::ERR_CONFIG_PARSE);
+        }
+        FLM_LOG_INFO("Cfg", "restored config from backup");
     }
     
     // Step 4: Parse each configuration section
@@ -235,7 +259,7 @@ ErrorCode ConfigManager::loadConfig() {
         parseSystemConfig(doc["system"]);
     }
     
-    Serial.println(F("[ConfigManager] Configuration loaded"));
+    FLM_LOG_INFO("Cfg", "loaded");
     return ErrorCode::ERR_NONE;
 }
 
@@ -243,48 +267,75 @@ ErrorCode ConfigManager::loadConfig() {
 // SECTION 6: SAVE CONFIGURATION
 // =============================================================================
 
-/**
- * @brief Save current configuration to LittleFS
- * @return ErrorCode indicating success or failure
- */
-ErrorCode ConfigManager::saveConfig() {
-    // Step 1: Create backup first
-    createBackup();
-    
-    // Step 2: Create JSON document
-    JsonDocument doc;
-    
-    // Step 3: Serialize all sections
-    JsonObject wifiObj = doc["wifi"].to<JsonObject>();
-    serializeWiFiConfig(wifiObj);
-    
-    JsonObject mqttObj = doc["mqtt"].to<JsonObject>();
-    serializeMQTTConfig(mqttObj);
-    
-    JsonObject tankObj = doc["tank"].to<JsonObject>();
-    serializeTankConfig(tankObj);
-    
-    JsonObject sensorObj = doc["sensor"].to<JsonObject>();
-    serializeSensorConfig(sensorObj);
-    
-    JsonObject systemObj = doc["system"].to<JsonObject>();
-    serializeSystemConfig(systemObj);
-    
-    // Step 4: Open file for writing
-    File file = LittleFS.open(CONFIG_FILE, "w");
-    if (!file) {
-        return ErrorHandler::getInstance().logError(ErrorCode::ERR_CONFIG_WRITE);
+bool ConfigManager::tryLockForConfigWrite() {
+    noInterrupts();
+    if (_configWriteLocked) {
+        interrupts();
+        return false;
     }
-    
-    // Step 5: Write JSON to file
+    _configWriteLocked = true;
+    interrupts();
+    return true;
+}
+
+void ConfigManager::unlockConfigWrite() {
+    _configWriteLocked = false;
+}
+
+ErrorCode ConfigManager::saveConfig() {
+    const bool held = _configWriteLocked;
+    if (!held) {
+        if (!tryLockForConfigWrite()) {
+            return ErrorCode::ERR_CONFIG_LOCKED;
+        }
+    }
+    ErrorCode e = saveConfigAtomic();
+    if (!held) {
+        unlockConfigWrite();
+    }
+    return e;
+}
+
+ErrorCode ConfigManager::saveConfigAtomic() {
+    createBackup();
+
+    JsonDocument doc;
+    JsonObject jo;
+    jo = doc["wifi"].to<JsonObject>();
+    serializeWiFiConfig(jo);
+    jo = doc["mqtt"].to<JsonObject>();
+    serializeMQTTConfig(jo);
+    jo = doc["tank"].to<JsonObject>();
+    serializeTankConfig(jo);
+    jo = doc["sensor"].to<JsonObject>();
+    serializeSensorConfig(jo);
+    jo = doc["system"].to<JsonObject>();
+    serializeSystemConfig(jo);
+
+    LittleFS.remove(CONFIG_TEMP_FILE);
+    File file = LittleFS.open(CONFIG_TEMP_FILE, "w");
+    if (!file) {
+        FLM_LOG_ERROR("Cfg", "open temp config failed (FS full?)");
+        return ErrorHandler::getInstance().logError(ErrorCode::ERR_FS_FULL);
+    }
     size_t written = serializeJsonPretty(doc, file);
     file.close();
-    
     if (written == 0) {
+        LittleFS.remove(CONFIG_TEMP_FILE);
         return ErrorHandler::getInstance().logError(ErrorCode::ERR_CONFIG_WRITE);
     }
-    
-    Serial.printf("[ConfigManager] Configuration saved (%u bytes)\n", written);
+
+    if (LittleFS.exists(CONFIG_FILE)) {
+        LittleFS.remove(CONFIG_FILE);
+    }
+    if (!LittleFS.rename(CONFIG_TEMP_FILE, CONFIG_FILE)) {
+        LittleFS.remove(CONFIG_TEMP_FILE);
+        (void)restoreBackup();
+        FLM_LOG_ERROR("Cfg", "atomic config rename failed");
+        return ErrorHandler::getInstance().logError(ErrorCode::ERR_CONFIG_WRITE);
+    }
+
+    FLM_LOG_INFO("Cfg", "saved %u bytes", (unsigned)written);
     return ErrorCode::ERR_NONE;
 }
 
@@ -367,23 +418,49 @@ ErrorCode ConfigManager::restoreBackup() {
  * @brief Validate current configuration values
  * @return ErrorCode indicating validation result
  */
+void ConfigManager::applyNumericClamps() {
+    if (_tankConfig.height < 50.f) _tankConfig.height = 50.f;
+    if (_tankConfig.height > 30000.f) _tankConfig.height = 30000.f;
+    if (_tankConfig.diameter < 10.f) _tankConfig.diameter = 10.f;
+    if (_tankConfig.diameter > 30000.f) _tankConfig.diameter = 30000.f;
+    if (_tankConfig.length < 0.f) _tankConfig.length = 0.f;
+    if (_tankConfig.width < 0.f) _tankConfig.width = 0.f;
+    if (_mqttConfig.port == 0 || _mqttConfig.port > 65535) _mqttConfig.port = DEFAULT_MQTT_PORT;
+    if (_systemConfig.webPort == 0 || _systemConfig.webPort > 65535) _systemConfig.webPort = DEFAULT_WEB_PORT;
+    if (_mqttConfig.publishInterval < 5000UL) _mqttConfig.publishInterval = 5000UL;
+    if (_mqttConfig.publishInterval > 86400000UL) _mqttConfig.publishInterval = 86400000UL;
+    if (_sensorConfig.readInterval < 200UL) _sensorConfig.readInterval = 200UL;
+    if (_sensorConfig.readInterval > 600000UL) _sensorConfig.readInterval = 600000UL;
+    if (_sensorConfig.samples < 1) _sensorConfig.samples = 1;
+    if (_sensorConfig.samples > 32) _sensorConfig.samples = 32;
+    if (_sensorConfig.medianFilterSize < 1) _sensorConfig.medianFilterSize = 3;
+    if (_sensorConfig.medianFilterSize > 15) _sensorConfig.medianFilterSize = 15;
+    if (_sensorConfig.movingAvgWindow < 1) _sensorConfig.movingAvgWindow = 1;
+    if (_sensorConfig.movingAvgWindow > 50) _sensorConfig.movingAvgWindow = 50;
+    if (_sensorConfig.kalmanProcessNoise < 1e-6f) _sensorConfig.kalmanProcessNoise = 1e-6f;
+    if (_sensorConfig.kalmanMeasureNoise < 1e-6f) _sensorConfig.kalmanMeasureNoise = 1e-6f;
+    if (_sensorConfig.minDistance < 1.f) _sensorConfig.minDistance = 1.f;
+    if (_sensorConfig.maxDistance > 10000.f) _sensorConfig.maxDistance = 10000.f;
+}
+
 ErrorCode ConfigManager::validateConfig() {
+    applyNumericClamps();
     bool hasWarnings = false;
     
     // Validate tank dimensions
     if (_tankConfig.height <= 0 || _tankConfig.height > 10000) {
-        Serial.println(F("[ConfigManager] Warning: Invalid tank height"));
+        FLM_LOG_WARN("Cfg", "invalid tank height");
         hasWarnings = true;
     }
     
     if (_tankConfig.type == "circular" && (_tankConfig.diameter <= 0 || _tankConfig.diameter > 10000)) {
-        Serial.println(F("[ConfigManager] Warning: Invalid tank diameter"));
+        FLM_LOG_WARN("Cfg", "invalid tank diameter");
         hasWarnings = true;
     }
     
     // Validate sensor config
     if (_sensorConfig.offsetMm < 0 || _sensorConfig.offsetMm > _tankConfig.height) {
-        Serial.println(F("[ConfigManager] Warning: Sensor offset out of range"));
+        FLM_LOG_WARN("Cfg", "sensor offset out of range");
         hasWarnings = true;
     }
     
@@ -600,6 +677,9 @@ String ConfigManager::getConfigJson() const {
  * @return ErrorCode indicating success or failure
  */
 ErrorCode ConfigManager::setConfigFromJson(const String& json) {
+    if (json.length() > FLM_MAX_CONFIG_JSON_BYTES) {
+        return ErrorHandler::getInstance().logError(ErrorCode::ERR_WEB_REQUEST, "config body too large");
+    }
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, json);
     
@@ -634,6 +714,9 @@ ErrorCode ConfigManager::setConfigFromJson(const String& json) {
  * @return ErrorCode indicating success or failure
  */
 ErrorCode ConfigManager::updateSection(const String& section, const String& json) {
+    if (json.length() > FLM_MAX_CONFIG_JSON_BYTES) {
+        return ErrorHandler::getInstance().logError(ErrorCode::ERR_WEB_REQUEST, "section body too large");
+    }
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, json);
     

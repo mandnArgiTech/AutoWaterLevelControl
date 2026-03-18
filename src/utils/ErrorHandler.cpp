@@ -7,6 +7,7 @@
  */
 
 #include "ErrorHandler.h"
+#include "Log.h"
 
 // =============================================================================
 // SECTION 1: SINGLETON INSTANCE
@@ -37,8 +38,13 @@ ErrorHandler::ErrorHandler()
     , _errorsFilePresent(false)
     , _lastPrintedCode(ErrorCode::ERR_NONE)
     , _lastPrintTime(0)
+    , _lookupCacheNext(0)
     , _suppressedCount(0) {
 
+    for (size_t i = 0; i < LOOKUP_CACHE_SIZE; i++) {
+        _lookupCache[i].valid = false;
+        _lookupCache[i].code = ErrorCode::ERR_NONE;
+    }
     for (size_t i = 0; i < MAX_ERROR_HISTORY; i++) {
         _errorHistory[i].code = ErrorCode::ERR_NONE;
         _errorHistory[i].severity = ErrorSeverity::INFO;
@@ -58,9 +64,9 @@ ErrorHandler::ErrorHandler()
 bool ErrorHandler::begin() {
     _errorsFilePresent = LittleFS.exists("/errors.json");
     if (_errorsFilePresent) {
-        Serial.println(F("[ErrorHandler] errors.json present (lazy lookup, no RAM cache)"));
+        FLM_LOG_INFO("Err", "errors.json present");
     } else {
-        Serial.println(F("[ErrorHandler] Warning: errors.json not found"));
+        FLM_LOG_WARN("Err", "errors.json not found");
     }
     _initialized = true;
     return true;
@@ -73,6 +79,25 @@ ErrorSeverity ErrorHandler::defaultSeverityFromCode(uint16_t codeNum) {
 }
 
 void ErrorHandler::lookupError(ErrorCode code, String& name, String& desc, ErrorSeverity& sev) const {
+    for (size_t i = 0; i < LOOKUP_CACHE_SIZE; i++) {
+        if (_lookupCache[i].valid && _lookupCache[i].code == code) {
+            name = _lookupCache[i].name;
+            desc = _lookupCache[i].desc;
+            sev = _lookupCache[i].sev;
+            return;
+        }
+    }
+    lookupErrorFromFile(code, name, desc, sev);
+    size_t slot = _lookupCacheNext % LOOKUP_CACHE_SIZE;
+    _lookupCacheNext = (uint8_t)((_lookupCacheNext + 1) % LOOKUP_CACHE_SIZE);
+    _lookupCache[slot].valid = true;
+    _lookupCache[slot].code = code;
+    _lookupCache[slot].name = name;
+    _lookupCache[slot].desc = desc;
+    _lookupCache[slot].sev = sev;
+}
+
+void ErrorHandler::lookupErrorFromFile(ErrorCode code, String& name, String& desc, ErrorSeverity& sev) const {
     uint16_t cn = static_cast<uint16_t>(code);
     name = "E" + String(cn);
     desc = "Error " + String(cn) + " - No description available";

@@ -10,7 +10,10 @@ FluidLevelMonitor is a robust, modular IoT water level monitoring system designe
 |----------|-------------|----------|
 | [User Guide](USER_GUIDE.md) | Setup, installation, and daily usage | End Users |
 | [Developer Guide](DEVELOPER_GUIDE.md) | Architecture, code structure, extending | Developers |
-| [API Reference](API_REFERENCE.md) | REST API and MQTT documentation | Integrators |
+| [API Reference](API_REFERENCE.md) | REST, MQTT, WebSocket, limits | Integrators |
+| [Architecture](ARCHITECTURE.md) | Boot, modules, OTA, logging, threat model | Developers |
+| [Code style](CODE_STYLE.md) | Comments, logging policy, secrets | Developers |
+| [Manual test matrix](MANUAL_TEST_MATRIX.md) | QA checklist, `pio check` | Developers |
 | [Sensor Guide](SENSOR_GUIDE.md) | Supported sensors and selection | Everyone |
 | [Troubleshooting](TROUBLESHOOTING.md) | Common issues and solutions | Everyone |
 
