@@ -133,6 +133,10 @@ private:
     void handleApiReset();
     void handleApiInfo();
 
+    // API handlers - Pump (Phase 2 / RelayManager)
+    void handleApiPumpGet();
+    void handleApiPumpPost();
+
     void handleFirmwareUpload();
     void handleFirmwareUploadComplete();
 

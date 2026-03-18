@@ -22,7 +22,7 @@
 
 #define MQTT_BUFFER_SIZE        512
 #define MQTT_RECONNECT_INTERVAL 5000
-#define MQTT_RECONNECT_MAX_MS   120000u
+#define MQTT_RECONNECT_MAX_MS   30000u   // 30s cap — pump control needs fast reconnect
 #ifndef MQTT_KEEPALIVE
 #define MQTT_KEEPALIVE          60
 #endif

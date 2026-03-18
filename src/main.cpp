@@ -36,6 +36,7 @@
 #include "network/CalibrationWS.h"
 #include "utils/Log.h"
 #include "utils/FlmTime.h"
+#include "relay/RelayManager.h"
 
 // =============================================================================
 // Global objects
@@ -198,6 +199,20 @@ void initializeSystem() {
 
     // --- Done ---
     Serial.println(F("\n========== Initialization Complete =========="));
+
+    // --- Relay / Pump (Phase 2) ---
+    Serial.println(F("\n>>> Relay Manager..."));
+    RelayConfig relayCfg;
+    relayCfg.enabled        = true;
+    relayCfg.pin            = D5;          // GPIO14 — change via config future
+    relayCfg.activeLow      = true;
+    relayCfg.pumpOnPercent  = 20.0f;
+    relayCfg.pumpOffPercent = 85.0f;
+    relayCfg.maxRunMinutes  = 30;
+    RelayManager::getInstance().begin(relayCfg);
+
+    // --- Watchdog ---
+    ESP.wdtEnable(8000);                   // 8-second software watchdog
     Serial.println();
 
     if (WiFiManager::getInstance().isConnected()) {
@@ -226,6 +241,8 @@ void processLoop() {
     WiFiManager::getInstance().loop();
     if (WiFiManager::getInstance().isOTAInProgress()) return;
 
+    ESP.wdtFeed();                         // feed watchdog each loop iteration
+
     TimeManager::getInstance().loop();
     MQTTManager::getInstance().loop();
 
@@ -237,7 +254,14 @@ void processLoop() {
         uint32_t interval = ConfigManager::getInstance().getSensorConfig().readInterval;
         if (flmElapsedMs(lastSensorRead, interval)) {
             readSensor();
+            // Update relay with fresh level
+            WaterLevel lv = calculator->getLastLevel();
+            if (lv.sensorOk && lv.valid) {
+                RelayManager::getInstance().loop(lv.percentFilled);
+            }
         }
+    } else {
+        RelayManager::getInstance().loop(calculator->getLastLevel().percentFilled);
     }
 
     // MQTT publish
@@ -362,6 +386,15 @@ void handleMQTTMessage(const String& topic, const String& payload) {
             Serial.println(F("[Main] Restarting..."));
             delay(500);
             ESP.restart();
+        } else if (cmd == "pump_on") {
+            RelayManager::getInstance().setMode(PumpMode::ON);
+            MQTTManager::getInstance().publish("pump", RelayManager::getInstance().getMQTTJson(), false);
+        } else if (cmd == "pump_off") {
+            RelayManager::getInstance().setMode(PumpMode::OFF);
+            MQTTManager::getInstance().publish("pump", RelayManager::getInstance().getMQTTJson(), false);
+        } else if (cmd == "pump_auto") {
+            RelayManager::getInstance().setMode(PumpMode::AUTO);
+            MQTTManager::getInstance().publish("pump", RelayManager::getInstance().getMQTTJson(), false);
         }
     }
 }

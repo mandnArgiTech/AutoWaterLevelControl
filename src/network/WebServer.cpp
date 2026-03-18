@@ -58,7 +58,12 @@ void WebServerManager::setupRoutes() {
     _server.on("/api/errors/clear", HTTP_POST, std::bind(&WebServerManager::handleApiErrorsClear, this));
 
     _server.on("/api/restart", HTTP_POST, std::bind(&WebServerManager::handleApiRestart, this));
-    _server.on("/api/reset", HTTP_POST, std::bind(&WebServerManager::handleApiReset, this));
+    _server.on("/api/reset",   HTTP_POST, std::bind(&WebServerManager::handleApiReset, this));
+
+    // Phase 2 — Pump relay control
+    _server.on("/api/pump", HTTP_GET,  std::bind(&WebServerManager::handleApiPumpGet,  this));
+    _server.on("/api/pump", HTTP_POST, std::bind(&WebServerManager::handleApiPumpPost, this));
+    _server.on("/api/pump", HTTP_OPTIONS, [this]() { addCorsHeaders(); _server.send(204); });
 
     _server.on(
         "/api/update",

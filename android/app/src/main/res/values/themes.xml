@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.FluidLevelMonitor" parent="android:Theme.Material.NoTitleBar" />
+</resources>

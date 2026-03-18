@@ -48,6 +48,7 @@ float FilteredSensorBase::readDistanceAverageMm(uint8_t samples) {
             validCount++;
         }
         if (i < samples - 1) {
+            yield();                    // allow WiFi/WS stack to service events
             delay(getSampleDelay());
         }
     }

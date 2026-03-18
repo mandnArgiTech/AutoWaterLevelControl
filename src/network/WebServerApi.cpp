@@ -243,3 +243,39 @@ void WebServerManager::handleApiReset() {
     delay(500);
     ESP.restart();
 }
+
+// =============================================================================
+// PUMP API  — Phase 2 (RelayManager)
+// =============================================================================
+#include "../relay/RelayManager.h"
+
+void WebServerManager::handleApiPumpGet() {
+    _requestCount++;
+    addCorsHeaders();
+    sendJson(200, RelayManager::getInstance().getStatusJson());
+}
+
+void WebServerManager::handleApiPumpPost() {
+    _requestCount++;
+    addCorsHeaders();
+
+    if (!_server.hasArg("plain")) {
+        sendApiFailure(400, "NO_BODY", "No body provided");
+        return;
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, _server.arg("plain"))) {
+        sendApiFailure(400, "PARSE_ERROR", "Invalid JSON");
+        return;
+    }
+
+    String state = doc["state"] | "";
+    if (state.isEmpty()) {
+        sendApiFailure(400, "MISSING_STATE", "Required field: state (on|off|auto)");
+        return;
+    }
+
+    RelayManager::getInstance().setMode(RelayManager::modeFromString(state));
+    sendSuccess("Pump mode set to " + state);
+}

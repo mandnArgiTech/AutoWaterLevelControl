@@ -133,3 +133,60 @@ Connect to `ws://<ip>:81/`. Text JSON commands (max **512** bytes per message):
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — boot, logging, config semantics
 - [CODE_STYLE.md](CODE_STYLE.md) — log levels, secrets
+
+---
+
+## REST — Pump Control (Phase 2 — RelayManager)
+
+### GET /api/pump
+
+Returns current relay/pump state.
+
+```json
+{
+  "enabled": true,
+  "mode": "auto",
+  "state": "stopped",
+  "runSeconds": 0,
+  "autoEnabled": true,
+  "dryRunBlocked": false,
+  "levelPercent": 42.5,
+  "pin": 14,
+  "thresholds": {
+    "onPercent": 20.0,
+    "offPercent": 85.0,
+    "maxRunMinutes": 30,
+    "dryRunGuardPct": 5.0
+  }
+}
+```
+
+### POST /api/pump
+
+Set operating mode.
+
+**Body:** `{ "state": "on" | "off" | "auto" }`
+
+**Responses:** `200 { "success": true }` · `400 MISSING_STATE` · `400 PARSE_ERROR`
+
+**Safety:** Dry-run guard (< 5% filled) and max-runtime cutoff (30 min) are always enforced, regardless of mode.
+
+---
+
+## MQTT — Pump (Phase 2)
+
+| Topic | Direction | Payload |
+|-------|-----------|---------|
+| `{deviceTag}/water/pump` | Device → App | `{ "state": "running"\|"stopped", "mode": "auto"\|"on"\|"off", "runSeconds": N, "blocked": false }` |
+| `{deviceTag}/water/command` | App → Device | `{ "command": "pump_on"\|"pump_off"\|"pump_auto" }` |
+
+---
+
+## Bug fixes applied (this sprint)
+
+| Issue | Fix |
+|-------|-----|
+| `delay()` in `readDistanceAverageMm` blocks WS frames | Added `yield()` before each inter-sample delay |
+| MQTT reconnect backoff cap was 120s | Reduced to 30s (`MQTT_RECONNECT_MAX_MS`) |
+| No watchdog timer | Added `ESP.wdtEnable(8000)` at init + `ESP.wdtFeed()` in loop |
+| Real credentials in `data/config.json` | Sanitized; MQTT disabled by default |
