@@ -1,87 +1,81 @@
-# 3D Print Files — FluidLevelMonitor Sensor Enclosure
+# 3D Print Files — FluidLevelMonitor Sensor Node
 
-## Files
+Three SCAD files. Open in OpenSCAD (or openscad.cloud), set `PART = "..."`, press F6, export STL.
 
-| File | Description |
-|------|-------------|
-| `sensor_enclosure.scad` | Master OpenSCAD file — all 5 parts |
+---
 
-## How to export each part for slicing
+## Files and parts
 
-Open `sensor_enclosure.scad` in OpenSCAD, change the `PART = "..."` line at the bottom:
+### 1. `sensor_mount_sintex.scad` — for Sintex overhead tank (black dome lid)
 
-| PART value | What it exports | Print orientation |
-|---|---|---|
-| `"body"` | Main enclosure box | Open face up — no supports needed |
-| `"lid"` | Snap+screw lid | Outside face down (flat) — supports for gasket groove |
-| `"pcb_tray"` | Snap-in PCB tray | Any — no supports needed |
-| `"battery_cradle"` | 2× 32700 cell holder | Open face up — no supports needed |
-| `"sensor_bracket"` | US-100 tank mount bracket | Flat face down — no supports |
-| `"all_exploded"` | All parts side-by-side | For checking fit only — not for slicing |
+| PART value | What it is |
+|---|---|
+| `"mount"` | Main hub + arms that clamp onto the Sintex lid |
+| `"clamp"` | Ring that goes under the lid to lock mount in place |
 
-Then: **Render** (F6) → **Export as STL** (File → Export → Export as STL).
+**How it mounts:** Boss drops through the ~40mm central hole in the Sintex dome lid. Three arms rest on the lid surface. The clamp ring slides up the boss from inside, M3 set-screws tighten. US-100 PCB slides into pocket inside hub, faces downward into tank. 4-wire cable exits via PG7 gland on hub side.
 
-## Print settings (Bambu Lab K1C)
+**Parameter to adjust:** `BOSS_OD = 38.5` — measure your tank's lid hole diameter and subtract 0.5mm clearance.
 
-| Setting | Value | Reason |
-|---------|-------|--------|
-| **Material** | **ASA** | UV and heat resistant. Outdoor enclosures in India need ASA — PLA warps above 60°C, PETG above 80°C |
-| Layer height | 0.2mm | Good balance of strength and speed |
-| Wall loops | **4** | Minimum for weatherproofing — 4 × ~0.86mm ≈ 3.4mm solid walls |
-| Top/bottom layers | 5 | Solid top face is critical for lid seal |
-| Infill | 40% gyroid | Strong in all directions |
-| Supports | Auto (normal) | Only needed for body's cable gland boss and lid gasket groove |
-| Brim | 5mm | ASA warps — use brim or glue stick on plate |
-| Print temp | 240°C (nozzle) / 90°C (bed) | Standard ASA profile on K1C |
-| Enclosure | **Closed** | ASA requires enclosed chamber — K1C is enclosed ✅ |
-| AMS | Single colour | No colour change needed |
+---
 
-## Parts overview
+### 2. `sensor_mount_rcc.scad` — for RCC / concrete overhead tank
 
-```
-                   ┌─────────────────────┐
-                   │    ENCLOSURE LID    │  ← M3 screws × 4
-                   │  (USB-C cutout)     │
-         ──────────┤─────────────────────├──────────
-         │         │    PCB TRAY         │          │
-         │         │  (D1 Mini + buck    │          │
-BODY     │         │   + charger)        │          │
-115×     │         └──────────────────── │          │
-89×      │         ┌─────────────────────┐          │
-55mm     │         │  BATTERY CRADLE     │          │
-         │         │  (2× 32700 cells)   │          │
-         │─────────┴─────────────────────┴──────────│
-         │  ← cable gland hole (12mm) on bottom     │
-         └───────────────────────────────────────────┘
-                   
-                         ↕ separate part
-                         
-         ┌─────────────────────────────────────────┐
-         │            SENSOR BRACKET               │
-         │  (mounts US-100 over tank opening)      │
-         │  Cable ties + M4 mounting holes         │
-         └─────────────────────────────────────────┘
-```
+| PART value | What it is |
+|---|---|
+| `"plinth"` | Flat plinth + sensor tube, bolts to concrete slab |
+| `"cap"` | Push-fit cap that locks US-100 in tube |
 
-## Post-print finishing
+**How it mounts:** Drill 4× M6 holes (90×70mm pattern) and 1× 36mm centre hole in concrete. M6 anchor bolts hold plinth down. RTV sealant fills groove under plinth. Tube extends 40mm below slab into tank air space. US-100 slides into tube from top, cap locks it.
 
-1. **Body + Lid:** Sand the lid mating face with 400-grit to ensure flat seal surface
-2. **Gasket groove:** Press 2mm × 2mm square EPDM cord (cut to length, join with superglue) into the groove
-3. **Cable gland hole:** Thread a PG7 cable gland (hand tight + 1/4 turn with wrench). Apply RTV silicone from inside
-4. **USB-C cutout:** Install panel-mount USB-C connector, seal perimeter with RTV
-5. **ASA post-process:** Light coat of UV-resistant clear lacquer extends UV life significantly
+---
 
-## Key dimensions (for verification after print)
+### 3. `electronics_box.scad` — weatherproof box (both tank types)
 
-Measure these with calipers before assembly:
+| PART value | What it is |
+|---|---|
+| `"body"` | Main box body |
+| `"lid"` | Screw-on lid (4× M4) with gasket groove |
+| `"pipe_clip_25"` | Pipe saddle for 25mm OD pipe |
+| `"pipe_clip_32"` | Pipe saddle for 32mm OD pipe (standard ½" GI) |
 
-| Dimension | Target | Tolerance |
-|-----------|--------|-----------|
-| Body inner width | 115mm | ±0.5mm |
-| Body inner height | 89mm | ±0.5mm |
-| Body inner depth | 53mm | ±0.5mm |
-| Cell pocket diameter | 32.5mm | ±0.3mm (should be snug) |
-| Cable gland hole | 12.2mm | ±0.1mm |
-| USB-C cutout | 10.0 × 7.5mm | ±0.2mm |
-| Boss hole (M3) | 2.8mm | ±0.1mm |
-| Lid rim fit | Snug slide, no rattle | — |
+**Holds:** 2× 32700 cells (horizontal), D1 Mini on shelf, MP1584 buck, CN3058E charger, 2S BMS.  
+**Cable in:** PG7 gland on bottom → 4-core cable → sensor mount.  
+**Charge:** USB-C panel-mount on right side.  
+**Mount:** Two keyhole slots on back for wall screws, OR pipe clip bolts to same positions.
+
+---
+
+## Print settings (Bambu K1C)
+
+| Setting | Value |
+|---------|-------|
+| Material | **ASA** — mandatory outdoors. PLA warps >60°C. |
+| Layer height | 0.2mm |
+| Wall loops | 4 |
+| Infill | 40% gyroid |
+| Supports | Auto — needed under sensor_mount_sintex arms and box lid gasket groove |
+| Brim | 5mm (ASA warps without it) |
+| Enclosure | Closed (K1C is enclosed ✅) |
+
+---
+
+## Key parameter to check before printing
+
+**`sensor_mount_sintex.scad` line 1:** `BOSS_OD = 38.5`
+
+Measure your Sintex tank lid's central hole with a calliper. Subtract 0.5mm. Set that value. If you print too big it won't fit; too small and it wobbles.
+
+---
+
+## One-time hardware needed
+
+| Part | Where |
+|------|-------|
+| PG7 cable gland (× per sensor) | Any electronics shop |
+| 2mm × 2mm EPDM square cord | Cut to length for gasket grooves |
+| RTV silicone (clear) | Seal plinth base on RCC mount |
+| M6 sleeve anchors × 4 | Only for RCC mount |
+| M5 bolts × 3 + nuts | Sintex mount arm clamp |
+| M3 set screws × 3 | Sintex clamp ring |
+| IP67 USB-C panel-mount | Electronics box charge port |
