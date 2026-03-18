@@ -1,298 +1,278 @@
 # FluidLevelMonitor
 
-## Sintex Tank Water Level Monitoring System
+**ESP8266 water-level monitor** for Sintex-style tanks and similar setups: distance → fill %, height, volume; WiFi + MQTT + web UI + REST; optional multi-sensor support.
 
-A comprehensive IoT water level monitoring solution for circular/rectangular tanks using ESP8266 (NodeMCU) and US-100 ultrasonic sensor.
+[![Platform](https://img.shields.io/badge/platform-ESP8266-orange)](https://www.espressif.com/)
+[![Framework](https://img.shields.io/badge/framework-Arduino-00979D)](https://www.arduino.cc/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![Platform](https://img.shields.io/badge/platform-ESP8266-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
+---
 
-## Features
+## Table of contents
 
-- **Water Level Monitoring**: Real-time water level measurement in percentage (0-100%)
-- **Volume Calculation**: Calculates current water volume in liters
-- **WiFi Connectivity**: Station mode with AP fallback for configuration
-- **MQTT Publishing**: Publishes water level data in JSON format with timestamps
-- **Web Interface**: Modern, responsive web UI for monitoring and configuration
-- **REST API**: Complete API for remote access and integration
-- **Configurable**: All settings stored in LittleFS and configurable via Web/REST
-- **Error Handling**: Comprehensive error codes with descriptions
-- **Auto Build Versioning**: Automatic build number increment on each compile
+1. [What you get](#what-you-get)
+2. [Hardware](#hardware)
+3. [Quick start](#quick-start)
+4. [Build & flash](#build--flash)
+5. [Firmware updates (OTA)](#firmware-updates-ota)
+6. [Configuration & access](#configuration--access)
+7. [REST API (summary)](#rest-api-summary)
+8. [MQTT](#mqtt)
+9. [WebSocket calibration](#websocket-calibration)
+10. [Logging & diagnostics](#logging--diagnostics)
+11. [Project layout](#project-layout)
+12. [Documentation suite](#documentation-suite)
+13. [Security notes](#security-notes)
+14. [Troubleshooting](#troubleshooting)
+15. [License & contributing](#license--contributing)
 
-## Hardware Requirements
+---
 
-### Components
+## What you get
 
-| Component | Description |
-|-----------|-------------|
-| NodeMCU V2 | ESP8266 development board |
-| US-100 | Ultrasonic distance sensor (serial mode) |
-| Jumper wires | For connections |
-| Power supply | 5V USB or external |
+| Area | Details |
+|------|---------|
+| **Measurement** | Percent filled / remaining, water height (cm), volume (L); tank states (empty, low, normal, high, full, etc.) |
+| **Filtering** | Median → moving average → optional Kalman (configurable) for stable surface readings |
+| **Sensors** | Pluggable drivers: **US-100**, **HC-SR04**, **TF-Luna**, **XKC-KD200** (see [doc/SENSOR_GUIDE.md](doc/SENSOR_GUIDE.md)) |
+| **Connectivity** | WiFi STA with **AP fallback** (captive-style DNS), **mDNS**, **NTP** |
+| **Integration** | **MQTT** (JSON + LWT), **REST API**, **Web UI** (LittleFS, gzip’d assets at build) |
+| **Calibration** | **WebSocket** on port **81** for live distance + offset save |
+| **Reliability** | Structured logging, error history, atomic config save, config write locking, Web + Arduino OTA |
+| **Tooling** | PlatformIO, auto build number, optional `pio check` (cppcheck) |
 
-### Wiring Diagram
+Runtime model: **single cooperative `loop()`** on ESP8266 (no RTOS threads); WiFi/MQTT/HTTP interleave via callbacks and `yield()`.
 
-```
-NodeMCU V2          US-100
----------           ------
-3.3V/5V    ------>  VCC
-GND        ------>  GND
-D1 (GPIO5) ------>  TX (Echo/RX)
-D2 (GPIO4) ------>  RX (Trig/TX)
+---
 
-Note: Set jumper on US-100 for Serial Mode (UART)
-```
+## Hardware
 
-### Default Tank Configuration (Sintex)
+### Minimum bill of materials
 
-| Parameter | Value |
-|-----------|-------|
-| Type | Circular |
+| Item | Notes |
+|------|--------|
+| **NodeMCU v2** (ESP8266, e.g. ESP-12E) | 80 MHz, ~80 KB RAM |
+| **Distance sensor** | US-100 recommended (UART); others per sensor guide |
+| **Power** | Stable 5 V USB or supply; adequate current for WiFi peaks |
+| **Wiring** | Per sensor; default US-100: **D1/GPIO5 ↔ sensor RX**, **D2/GPIO4 ↔ sensor TX**, GND, VCC (see sensor datasheet for UART mode jumper) |
+
+### Default tank preset (circular / Sintex-style)
+
+| Parameter | Default |
+|-----------|---------|
 | Diameter | 1350 mm |
 | Height | 1704.5 mm |
-| Volume | ~2438 liters |
+| Volume (computed) | ~2438 L |
 
-## Installation
+Override via web UI or REST (`/api/config/tank`).
 
-### Prerequisites
+---
 
-- [PlatformIO](https://platformio.org/) (VSCode extension or CLI)
-- Python 3.x (for build scripts)
+## Quick start
 
-### Build & Upload
+1. **Flash firmware** and **LittleFS** (see below).
+2. Power on; if no STA credentials (or connect fails), device opens **AP** (default SSID/password in `data/config.json` — often `FluidMonitor-AP` / `12345678`).
+3. Browse **`http://192.168.4.1`** → configure WiFi, tank, sensor, MQTT.
+4. On LAN: **`http://<device-ip>/`** or **`http://<hostname>.local/`** (if mDNS works on your network).
 
-1. **Clone or download the project**
+Full walkthrough: **[doc/USER_GUIDE.md](doc/USER_GUIDE.md)**.
 
-2. **Build the firmware**:
-   ```bash
-   pio run
-   ```
+---
 
-3. **Upload to NodeMCU**:
-   ```bash
-   pio run --target upload
-   ```
+## Build & flash
 
-4. **Upload LittleFS filesystem** (for web interface and configs):
-   ```bash
-   pio run --target uploadfs
-   ```
+**Prerequisites:** [PlatformIO](https://platformio.org/) (CLI or VS Code), Python 3 (pre-build scripts).
 
-### Firmware updates (OTA)
+```bash
+# Compile
+pio run
 
-- **Web UI**: Open **Firmware** tab, select `.pio/build/nodemcuv2/firmware.bin`, upload. MQTT and WebSocket pause during upload to free RAM.
-- **ArduinoOTA** (IDE / `pio run -t upload --upload-port IP`): Before transfer, the device disconnects MQTT, stops WebSocket and HTTP server, then prints free heap on serial.
-- **Memory**: Error descriptions load from LittleFS on demand (no large JSON in RAM). WiFi scan returns at most 10 networks. `index.html` is gzip-compressed on build for smaller flash use.
+# Serial upload (USB)
+pio run -t upload
 
-**Architecture / QA:** See [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md), [doc/MANUAL_TEST_MATRIX.md](doc/MANUAL_TEST_MATRIX.md). Run `pio check -e nodemcuv2` for static analysis.
+# LittleFS (web UI, default config, errors.json) — required for first use
+pio run -t uploadfs
 
-5. **Monitor serial output**:
-   ```bash
-   pio device monitor
-   ```
-
-## Configuration
-
-### First-Time Setup
-
-1. Power on the device
-2. Connect to WiFi AP: `FluidMonitor-AP` (password: `12345678`)
-3. Open browser: `http://192.168.4.1`
-4. Configure WiFi credentials
-5. Device will restart and connect to your network
-
-### Access Methods
-
-| Method | URL |
-|--------|-----|
-| mDNS | `http://fluidmonitor.local` |
-| IP Address | Check serial output or router |
-| AP Mode | `http://192.168.4.1` |
-
-## REST API
-
-### Status Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/status` | GET | Device and level status |
-| `/api/level` | GET | Current water level |
-| `/api/sensor` | GET | Sensor status |
-| `/api/info` | GET | Device information |
-
-### Configuration Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/config` | GET | Full configuration |
-| `/api/config` | POST | Update full configuration |
-| `/api/config/wifi` | GET/POST | WiFi settings |
-| `/api/config/mqtt` | GET/POST | MQTT settings |
-| `/api/config/tank` | GET/POST | Tank dimensions |
-| `/api/config/sensor` | GET/POST | Sensor calibration |
-| `/api/config/system` | GET/POST | System settings |
-
-### Network Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/wifi/status` | GET | WiFi status |
-| `/api/wifi/scan` | GET | Scan available networks |
-| `/api/mqtt/status` | GET | MQTT status |
-| `/api/time` | GET | Time status |
-
-### System Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/errors` | GET | Error history |
-| `/api/errors/clear` | POST | Clear errors |
-| `/api/restart` | POST | Restart device |
-| `/api/reset` | POST | Factory reset |
-
-### Example API Response
-
-**GET /api/level**
-```json
-{
-  "percentage": 75.5,
-  "waterHeightMm": 1287,
-  "volumeLiters": 1840.5,
-  "distanceMm": 467.5,
-  "temperatureC": 28,
-  "valid": true,
-  "state": "high",
-  "timestamp": 125000
-}
+# Serial monitor @ 115200
+pio device monitor
 ```
+
+**Optional build flags** (in `platformio.ini` → `build_flags`):
+
+- `-D FLM_LOG_VERBOSE` — DEBUG/TRACE log lines on Serial  
+- `-D FLM_DEBUG` — lightweight assertions (`FLM_ASSERT`)
+
+**Static analysis:**
+
+```bash
+pio check -e nodemcuv2
+```
+
+(Build also runs `build_increment.py` and `gzip_www.py`: compressed `index.html.gz` where applicable.)
+
+---
+
+## Firmware updates (OTA)
+
+| Method | How |
+|--------|-----|
+| **Web UI** | **Firmware** tab → upload `firmware.bin` → **POST `/api/update`**. MQTT + WebSocket are paused during upload to free heap; on failure services are restored. |
+| **ArduinoOTA** | IDE / `pio run -t upload --upload-port <IP>`. Before transfer: MQTT disconnect, WebSocket stop, **HTTP server stop** to maximize heap for OTA. |
+
+See **[doc/ARCHITECTURE.md](doc/ARCHITECTURE.md)** for OTA flow and memory considerations.
+
+---
+
+## Configuration & access
+
+- **Storage:** JSON on **LittleFS** (`/config.json`), with backup `config.bak`; saves use a temp file + rename (atomic).
+- **Concurrent writes:** One config transaction at a time; overlapping REST/WebSocket saves may get **503** / `CONFIG_LOCKED`.
+- **POST body limit:** **12288 bytes** for full/section config JSON.
+
+| Access | URL |
+|--------|-----|
+| AP mode | `http://192.168.4.1` |
+| STA | `http://<ip>/` or `http://<hostname>.local/` |
+
+---
+
+## REST API (summary)
+
+Base: `http://<host>/api/…`
+
+| Group | Examples |
+|-------|----------|
+| **Status** | `GET /api/status` (heap, fragmentation, max free block, level, connection), `/api/level`, `/api/sensor`, `/api/info` |
+| **Config** | `GET|POST /api/config`, `GET|POST /api/config/{wifi\|mqtt\|tank\|sensor\|system}` |
+| **Network** | `/api/wifi/status`, `/api/wifi/scan` (max **10** SSIDs in response), `/api/mqtt/status`, `/api/time` (`timeValid` / NTP) |
+| **System** | `/api/errors`, `POST /api/errors/clear`, `POST /api/restart`, `POST /api/reset` |
+| **OTA** | `POST /api/update` (multipart firmware) |
+
+Stable error JSON (many failures): `{ "success": false, "code": "…", "message": "…" }`.
+
+**Authoritative schema and limits:** **[doc/API_REFERENCE.md](doc/API_REFERENCE.md)**.
+
+---
 
 ## MQTT
 
-### Topics
+Topics are **device-scoped**, typically:
 
-| Topic | Description |
-|-------|-------------|
-| `home/water/level` | Water level data (JSON) |
-| `home/water/status` | Device status (JSON) |
-| `home/water/command` | Receive commands |
+`{topicPrefix}/{deviceName}_{chipId}/…`
 
-### MQTT Payload Example
+Subtopics include **`level`**, **`status`** (LWT), **`command`** (subscribe). Payloads are JSON; timestamps depend on NTP when synchronized.
+
+Commands (example topic suffix `…/command`):
 
 ```json
-{
-  "device": "Water Tank Monitor",
-  "timestamp": "2024-01-15T10:30:00+05:30",
-  "level": {
-    "percentage": 75.5,
-    "waterHeightMm": 1287,
-    "volumeLiters": 1840.5,
-    "state": "high"
-  },
-  "sensor": {
-    "distanceMm": 468,
-    "temperatureC": 28,
-    "valid": true
-  },
-  "tank": {
-    "type": "circular",
-    "heightMm": 1704.5,
-    "totalVolumeLiters": 2438.0
-  }
-}
+{"command": "read"}
+{"command": "status"}
+{"command": "restart"}
 ```
 
-### MQTT Commands
+Reconnect uses **exponential backoff** (capped). Details: [doc/API_REFERENCE.md](doc/API_REFERENCE.md), [doc/USER_GUIDE.md](doc/USER_GUIDE.md).
 
-Send to `home/water/command`:
-```json
-{"command": "read"}      // Force reading
-{"command": "status"}    // Publish status
-{"command": "restart"}   // Restart device
-```
+---
 
-## Project Structure
+## WebSocket calibration
+
+- **URL:** `ws://<device-ip>:81/`
+- **Purpose:** Live distance, set offset (cm), save offset to config, reset offset.
+- **Limits:** JSON commands capped (**512 bytes**); save respects config lock (`CONFIG_LOCKED` if busy).
+
+---
+
+## Logging & diagnostics
+
+- Serial **115200**, lines like **`[FLM][I][WiFi] message`** (I=INFO, W=WARN, E=ERROR; D/T need `FLM_LOG_VERBOSE`).
+- **Do not log or share** full config dumps publicly; firmware avoids printing WiFi/MQTT passwords by design.
+- **`GET /api/status`**: heap, fragmentation, max free block for field diagnosis.
+
+---
+
+## Project layout
 
 ```
 FluidLevelMonitor/
-├── data/                    # LittleFS files
-│   ├── config.json          # Configuration
-│   ├── errors.json          # Error descriptions
-│   └── index.html           # Web interface
+├── data/                      # LittleFS image source
+│   ├── config.json
+│   ├── errors.json
+│   └── index.html (+ .gz from build)
+├── doc/                       # Full doc suite (see below)
 ├── scripts/
-│   ├── build_increment.py   # Build version script
-│   └── build_number.json    # Build counter
+│   ├── build_increment.py
+│   ├── gzip_www.py
+│   └── build_number.json
 ├── src/
-│   ├── config/
-│   │   ├── ConfigManager.h/.cpp
-│   ├── network/
-│   │   ├── WiFiManager.h/.cpp
-│   │   ├── MQTTManager.h/.cpp
-│   │   └── WebServer.h/.cpp
-│   ├── sensor/
-│   │   └── UltrasonicSensor.h/.cpp
-│   ├── tank/
-│   │   └── TankCalculator.h/.cpp
-│   ├── utils/
-│   │   ├── ErrorHandler.h/.cpp
-│   │   └── TimeManager.h/.cpp
+│   ├── main.cpp
 │   ├── version.h
-│   └── main.cpp
+│   ├── config/                # ConfigManager (LittleFS, atomic save, clamps)
+│   ├── network/
+│   │   ├── WiFiManager        # STA/AP, OTA, DNS, mDNS
+│   │   ├── MQTTManager
+│   │   ├── WebServer.cpp      # Core HTTP + static files
+│   │   ├── WebServerApi.cpp   # REST handlers
+│   │   ├── WebServerFirmware.cpp  # POST /api/update
+│   │   └── CalibrationWS.cpp  # Port 81
+│   ├── sensor/                # ISensor, factory, filters, drivers
+│   ├── tank/                  # TankCalculator
+│   └── utils/                 # ErrorHandler, TimeManager, Log, FlmTime
 ├── platformio.ini
 └── README.md
 ```
 
-## Error Codes
+---
 
-| Range | Category |
-|-------|----------|
-| 0xx | System |
-| 1xx | Sensor |
-| 2xx | Tank |
-| 3xx | WiFi |
-| 4xx | MQTT |
-| 5xx | Config/Storage |
-| 6xx | Web Server |
-| 7xx | Time |
+## Documentation suite
 
-See `data/errors.json` for complete error descriptions.
-
-## Calibration
-
-### Sensor Offset
-
-The sensor offset is the distance from the sensor to the water surface when the tank is full:
-
-1. Fill tank to maximum level
-2. Note the sensor distance reading
-3. Set this value as `offsetMm` in sensor configuration
-
-### Tank Dimensions
-
-For accurate volume calculation:
-1. Measure actual tank dimensions
-2. Update via web interface or API
-3. Volume is auto-calculated
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| No sensor reading | Check wiring, verify serial mode jumper |
-| WiFi not connecting | Verify credentials, check signal strength |
-| MQTT not publishing | Verify broker settings, check network |
-| Incorrect readings | Calibrate sensor offset |
-| AP mode not starting | Factory reset, check for conflicts |
-
-## License
-
-MIT License - See LICENSE file for details.
-
-## Contributing
-
-Contributions welcome! Please submit pull requests or open issues.
+| Document | Purpose |
+|----------|---------|
+| [doc/README.md](doc/README.md) | Doc index |
+| [doc/USER_GUIDE.md](doc/USER_GUIDE.md) | End-user setup & daily use |
+| [doc/DEVELOPER_GUIDE.md](doc/DEVELOPER_GUIDE.md) | Code layout, build, extending sensors |
+| [doc/API_REFERENCE.md](doc/API_REFERENCE.md) | REST, MQTT, WebSocket, limits |
+| [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) | Boot, modules, OTA, threat model |
+| [doc/CODE_STYLE.md](doc/CODE_STYLE.md) | Comments, logging policy |
+| [doc/SENSOR_GUIDE.md](doc/SENSOR_GUIDE.md) | Sensor choice & wiring |
+| [doc/TROUBLESHOOTING.md](doc/TROUBLESHOOTING.md) | Common failures |
+| [doc/MANUAL_TEST_MATRIX.md](doc/MANUAL_TEST_MATRIX.md) | Manual QA checklist |
 
 ---
 
-**FluidLevelMonitor** - IoT Water Level Monitoring Made Easy
+## Security notes
 
+- **No HTTP authentication** — treat the device as **trusted LAN only** (or isolate VLAN / firewall).
+- Change default **AP password** before deployment.
+- Use **MQTT TLS** only if you add a TLS-capable stack/client (not in default PubSubClient plain TCP path).
+- Rotate any **Git remote credentials** if they were ever embedded in URLs.
+
+---
+
+## Troubleshooting
+
+| Symptom | Pointer |
+|---------|---------|
+| Sensor dead / timeouts | Wiring, UART mode, [doc/TROUBLESHOOTING.md](doc/TROUBLESHOOTING.md) |
+| WiFi / AP issues | Credentials, RSSI, AP fallback |
+| MQTT silent | Broker reachability, `publishInterval`, backoff |
+| OTA fails / crash | Free heap; use Web OTA or ensure ArduinoOTA path (services stopped) |
+| Config won’t save | **507** FS full; **503** locked — retry |
+| Corrupt config | Backup restore on boot; see ARCHITECTURE |
+
+---
+
+## Error codes
+
+Central list in **`data/errors.json`** (loaded on demand + cached lookups). Ranges: 0xx system, 1xx sensor, 2xx tank, 3xx WiFi, 4xx MQTT, 5xx config/FS, 6xx web, 7xx time.
+
+---
+
+## License & contributing
+
+**MIT** — see [LICENSE](LICENSE) if present in the repo.
+
+Contributions via issues and pull requests are welcome; run **`pio run`** and consider **`pio check`** before submitting.
+
+---
+
+**FluidLevelMonitor** — tank level on ESP8266 with MQTT, REST, and a maintainable modular codebase.
