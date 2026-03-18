@@ -1,0 +1,304 @@
+{
+  "version": "1.0.0",
+  "description": "FluidLevelMonitor Error Codes and Descriptions",
+  "categories": {
+    "SYSTEM": "0xx - System and initialization errors",
+    "SENSOR": "1xx - Ultrasonic sensor errors",
+    "TANK": "2xx - Tank calculation errors",
+    "WIFI": "3xx - WiFi connection errors",
+    "MQTT": "4xx - MQTT communication errors",
+    "CONFIG": "5xx - Configuration and storage errors",
+    "WEB": "6xx - Web server errors",
+    "TIME": "7xx - Time synchronization errors"
+  },
+  "errors": {
+    "0": {
+      "code": "E000",
+      "name": "ERR_NONE",
+      "severity": "info",
+      "description": "No error - Operation completed successfully",
+      "action": "None required"
+    },
+    "1": {
+      "code": "E001",
+      "name": "ERR_SYSTEM_INIT",
+      "severity": "critical",
+      "description": "System initialization failed",
+      "action": "Check hardware connections and restart device"
+    },
+    "2": {
+      "code": "E002",
+      "name": "ERR_SYSTEM_MEMORY",
+      "severity": "critical",
+      "description": "Insufficient memory available",
+      "action": "Reduce memory usage or restart device"
+    },
+    "3": {
+      "code": "E003",
+      "name": "ERR_SYSTEM_WATCHDOG",
+      "severity": "warning",
+      "description": "Watchdog timer triggered",
+      "action": "Check for infinite loops or blocking operations"
+    },
+
+    "100": {
+      "code": "E100",
+      "name": "ERR_SENSOR_INIT",
+      "severity": "critical",
+      "description": "Ultrasonic sensor initialization failed",
+      "action": "Check sensor wiring (TX->D1, RX->D2) and power supply"
+    },
+    "101": {
+      "code": "E101",
+      "name": "ERR_SENSOR_TIMEOUT",
+      "severity": "warning",
+      "description": "Sensor did not respond within timeout period",
+      "action": "Check sensor connection and ensure jumper is set to serial mode"
+    },
+    "102": {
+      "code": "E102",
+      "name": "ERR_SENSOR_INVALID_DATA",
+      "severity": "warning",
+      "description": "Sensor returned invalid or out-of-range data",
+      "action": "Check for obstructions and sensor alignment"
+    },
+    "103": {
+      "code": "E103",
+      "name": "ERR_SENSOR_DISTANCE_MIN",
+      "severity": "info",
+      "description": "Distance below minimum range (20mm)",
+      "action": "Object too close to sensor"
+    },
+    "104": {
+      "code": "E104",
+      "name": "ERR_SENSOR_DISTANCE_MAX",
+      "severity": "info",
+      "description": "Distance above maximum range (4500mm)",
+      "action": "Object too far from sensor or no reflection"
+    },
+    "105": {
+      "code": "E105",
+      "name": "ERR_SENSOR_TEMP_INVALID",
+      "severity": "warning",
+      "description": "Temperature reading out of valid range",
+      "action": "Sensor may need calibration or replacement"
+    },
+
+    "200": {
+      "code": "E200",
+      "name": "ERR_TANK_CONFIG",
+      "severity": "error",
+      "description": "Invalid tank configuration parameters",
+      "action": "Verify tank dimensions in configuration"
+    },
+    "201": {
+      "code": "E201",
+      "name": "ERR_TANK_LEVEL_NEGATIVE",
+      "severity": "warning",
+      "description": "Calculated water level is negative",
+      "action": "Check sensor offset configuration"
+    },
+    "202": {
+      "code": "E202",
+      "name": "ERR_TANK_LEVEL_OVERFLOW",
+      "severity": "warning",
+      "description": "Calculated water level exceeds 100%",
+      "action": "Tank may be overflowing or sensor offset incorrect"
+    },
+    "203": {
+      "code": "E203",
+      "name": "ERR_TANK_EMPTY",
+      "severity": "info",
+      "description": "Tank is empty (0% water level)",
+      "action": "Informational - tank needs refilling"
+    },
+    "204": {
+      "code": "E204",
+      "name": "ERR_TANK_FULL",
+      "severity": "info",
+      "description": "Tank is full (100% water level)",
+      "action": "Informational - tank is at capacity"
+    },
+
+    "300": {
+      "code": "E300",
+      "name": "ERR_WIFI_INIT",
+      "severity": "error",
+      "description": "WiFi module initialization failed",
+      "action": "Restart device"
+    },
+    "301": {
+      "code": "E301",
+      "name": "ERR_WIFI_CONNECT",
+      "severity": "error",
+      "description": "Failed to connect to WiFi network",
+      "action": "Verify SSID and password in configuration"
+    },
+    "302": {
+      "code": "E302",
+      "name": "ERR_WIFI_DISCONNECTED",
+      "severity": "warning",
+      "description": "WiFi connection lost",
+      "action": "Device will attempt automatic reconnection"
+    },
+    "303": {
+      "code": "E303",
+      "name": "ERR_WIFI_NO_SSID",
+      "severity": "error",
+      "description": "No SSID configured",
+      "action": "Configure WiFi settings via AP mode"
+    },
+    "304": {
+      "code": "E304",
+      "name": "ERR_WIFI_AP_FAILED",
+      "severity": "critical",
+      "description": "Failed to start Access Point mode",
+      "action": "Restart device"
+    },
+
+    "400": {
+      "code": "E400",
+      "name": "ERR_MQTT_INIT",
+      "severity": "error",
+      "description": "MQTT client initialization failed",
+      "action": "Check MQTT configuration"
+    },
+    "401": {
+      "code": "E401",
+      "name": "ERR_MQTT_CONNECT",
+      "severity": "error",
+      "description": "Failed to connect to MQTT broker",
+      "action": "Verify broker address, port, and credentials"
+    },
+    "402": {
+      "code": "E402",
+      "name": "ERR_MQTT_DISCONNECTED",
+      "severity": "warning",
+      "description": "MQTT connection lost",
+      "action": "Device will attempt automatic reconnection"
+    },
+    "403": {
+      "code": "E403",
+      "name": "ERR_MQTT_PUBLISH",
+      "severity": "warning",
+      "description": "Failed to publish message to MQTT",
+      "action": "Check broker connection and topic permissions"
+    },
+    "404": {
+      "code": "E404",
+      "name": "ERR_MQTT_SUBSCRIBE",
+      "severity": "warning",
+      "description": "Failed to subscribe to MQTT topic",
+      "action": "Check topic permissions"
+    },
+    "405": {
+      "code": "E405",
+      "name": "ERR_MQTT_DISABLED",
+      "severity": "info",
+      "description": "MQTT is disabled in configuration",
+      "action": "Enable MQTT in settings if needed"
+    },
+
+    "500": {
+      "code": "E500",
+      "name": "ERR_CONFIG_INIT",
+      "severity": "critical",
+      "description": "Configuration system initialization failed",
+      "action": "Format LittleFS and restart"
+    },
+    "501": {
+      "code": "E501",
+      "name": "ERR_CONFIG_READ",
+      "severity": "error",
+      "description": "Failed to read configuration file",
+      "action": "Configuration will use defaults"
+    },
+    "502": {
+      "code": "E502",
+      "name": "ERR_CONFIG_WRITE",
+      "severity": "error",
+      "description": "Failed to write configuration file",
+      "action": "Check filesystem space"
+    },
+    "503": {
+      "code": "E503",
+      "name": "ERR_CONFIG_PARSE",
+      "severity": "error",
+      "description": "Failed to parse configuration JSON",
+      "action": "Configuration file may be corrupted"
+    },
+    "504": {
+      "code": "E504",
+      "name": "ERR_CONFIG_VALIDATE",
+      "severity": "warning",
+      "description": "Configuration validation failed",
+      "action": "Check configuration values"
+    },
+    "505": {
+      "code": "E505",
+      "name": "ERR_FS_MOUNT",
+      "severity": "critical",
+      "description": "Failed to mount LittleFS filesystem",
+      "action": "Format filesystem and restart"
+    },
+    "506": {
+      "code": "E506",
+      "name": "ERR_FS_FULL",
+      "severity": "error",
+      "description": "Filesystem is full",
+      "action": "Remove unused files"
+    },
+
+    "600": {
+      "code": "E600",
+      "name": "ERR_WEB_INIT",
+      "severity": "error",
+      "description": "Web server initialization failed",
+      "action": "Check port availability"
+    },
+    "601": {
+      "code": "E601",
+      "name": "ERR_WEB_REQUEST",
+      "severity": "warning",
+      "description": "Invalid web request received",
+      "action": "Check API documentation"
+    },
+    "602": {
+      "code": "E602",
+      "name": "ERR_WEB_AUTH",
+      "severity": "warning",
+      "description": "Web authentication failed",
+      "action": "Check credentials"
+    },
+    "603": {
+      "code": "E603",
+      "name": "ERR_WEB_FILE_NOT_FOUND",
+      "severity": "warning",
+      "description": "Requested file not found",
+      "action": "Upload missing files to filesystem"
+    },
+
+    "700": {
+      "code": "E700",
+      "name": "ERR_TIME_INIT",
+      "severity": "warning",
+      "description": "Time synchronization initialization failed",
+      "action": "Check NTP server configuration"
+    },
+    "701": {
+      "code": "E701",
+      "name": "ERR_TIME_SYNC",
+      "severity": "warning",
+      "description": "Failed to synchronize time with NTP server",
+      "action": "Check internet connection"
+    },
+    "702": {
+      "code": "E702",
+      "name": "ERR_TIME_INVALID",
+      "severity": "info",
+      "description": "System time not yet synchronized",
+      "action": "Wait for NTP synchronization"
+    }
+  }
+}
+

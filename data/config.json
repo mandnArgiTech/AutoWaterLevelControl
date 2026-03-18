@@ -1,0 +1,62 @@
+{
+  "wifi": {
+    "ssid": "dvpmobile",
+    "password": "interOP@123",
+    "hostname": "FluidMonitor",
+    "apSsid": "FluidMonitor-AP",
+    "apPassword": "12345678",
+    "connectTimeout": 30000,
+    "apMode": false
+  },
+  "mqtt": {
+    "enabled": true,
+    "server": "10.216.122.221",
+    "port": 1883,
+    "username": "",
+    "password": "",
+    "clientId": "FluidMonitor",
+    "deviceName": "tank1",
+    "topicPrefix": "water",
+    "publishInterval": 60000
+  },
+  "tank": {
+    "type": "circular",
+    "diameter": 1350.0,
+    "length": 0,
+    "width": 0,
+    "height": 1704.5,
+    "volumeLiters": 2438.0
+  },
+  "sensor": {
+    "hardware": {
+      "type": "US100",
+      "rxPin": 5,
+      "txPin": 4,
+      "trigPin": 5,
+      "echoPin": 4,
+      "signalPin": 14,
+      "mountHeightMm": 500.0,
+      "tankHeightMm": 1704.5,
+      "invertedLogic": false
+    },
+    "offsetMm": 50.0,
+    "minDistance": 20.0,
+    "maxDistance": 4500.0,
+    "samples": 5,
+    "readInterval": 2000,
+    "filterEnabled": true,
+    "medianFilterSize": 5,
+    "movingAvgWindow": 10,
+    "kalmanEnabled": true,
+    "kalmanProcessNoise": 0.01,
+    "kalmanMeasureNoise": 0.1
+  },
+  "system": {
+    "deviceName": "Water Tank Monitor",
+    "timezoneOffset": 19800,
+    "ntpServer": "pool.ntp.org",
+    "webPort": 80,
+    "debugEnabled": true
+  }
+}
+
