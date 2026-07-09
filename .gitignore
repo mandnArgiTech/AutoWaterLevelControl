@@ -30,5 +30,8 @@ __pycache__/
 # Logs
 *.log
 
+# Secrets (GitHub tokens, credentials)
+.env
+
 # Generated from index.html (rebuilt by gzip_www.py)
 data/index.html.gz
