@@ -7,7 +7,19 @@
  */
 
 #include "TankCalculator.h"
+#include "../sensor/DHT11Ambient.h"
 #include <ESP8266WiFi.h>
+
+static void applyAmbientReading(DHT11Ambient* ambient, WaterLevel& level) {
+    if (!ambient) return;
+    ambient->update();
+    if (ambient->hasValidReading()) {
+        level.temperatureC = ambient->getTemperatureC();
+        level.humidityPct = ambient->getHumidityPct();
+        level.temperatureValid = true;
+        level.humidityValid = true;
+    }
+}
 
 // =============================================================================
 // SECTION 1: CONSTRUCTOR
@@ -17,8 +29,9 @@
  * @brief Constructor with sensor reference
  * @param sensor Reference to ISensor implementation
  */
-TankCalculator::TankCalculator(ISensor& sensor)
+TankCalculator::TankCalculator(ISensor& sensor, DHT11Ambient* ambient)
     : _sensor(sensor)
+    , _ambient(ambient)
     , _initialized(false) {
 }
 
@@ -89,12 +102,16 @@ WaterLevel TankCalculator::calculate() {
     SensorReading reading = _sensor.getReading();
     level.distanceMm = reading.distanceMm;
     level.distanceCm = reading.distanceCm;
-    level.temperatureC = reading.temperatureC;
+    if (reading.temperatureValid) {
+        level.temperatureC = reading.temperatureC;
+        level.temperatureValid = true;
+    }
     
     // Step 3: Sensor did not return valid data — skip calculation entirely
     if (!reading.distanceValid) {
         level.error = reading.lastError;
         level.sensorOk = false;
+        applyAmbientReading(_ambient, level);
         _lastLevel = level;
         return level;
     }
@@ -102,7 +119,11 @@ WaterLevel TankCalculator::calculate() {
     // Step 4: Sensor is OK — calculate from distance
     WaterLevel calculatedLevel = calculateFromDistance(reading.distanceMm);
     calculatedLevel.sensorOk = true;
-    calculatedLevel.temperatureC = reading.temperatureC;
+    if (reading.temperatureValid) {
+        calculatedLevel.temperatureC = reading.temperatureC;
+        calculatedLevel.temperatureValid = true;
+    }
+    applyAmbientReading(_ambient, calculatedLevel);
     calculatedLevel.timestamp = level.timestamp;
     
     _lastLevel = calculatedLevel;
@@ -190,15 +211,6 @@ WaterLevel TankCalculator::calculateFromDistance(float distanceMm) {
     return level;
 }
 
-/**
- * @brief Calculate water level from distance in cm
- * @param distanceCm Distance reading in cm
- * @return WaterLevel structure with calculated values
- */
-WaterLevel TankCalculator::calculateFromDistanceCm(float distanceCm) {
-    return calculateFromDistance(distanceCm * 10.0f);
-}
-
 // =============================================================================
 // SECTION 4: VOLUME CALCULATION
 // =============================================================================
@@ -244,25 +256,6 @@ float TankCalculator::clampPercentage(float percentage) {
         return 100;
     }
     return percentage;
-}
-
-/**
- * @brief Get effective tank height (accounting for sensor offset)
- * @return Effective height in mm
- */
-float TankCalculator::getEffectiveTankHeight() const {
-    TankConfig& tankConfig = ConfigManager::getInstance().getTankConfig();
-    return tankConfig.height;
-}
-
-/**
- * @brief Calculate water height from percentage
- * @param percentage Water level percentage
- * @return Water height in mm
- */
-float TankCalculator::percentageToHeight(float percentage) const {
-    TankConfig& config = ConfigManager::getInstance().getTankConfig();
-    return (percentage / 100.0f) * config.height;
 }
 
 /**
@@ -368,7 +361,13 @@ String TankCalculator::getWaterLevelJson() const {
     // Sensor readings
     doc["distanceMm"] = round(_lastLevel.distanceMm);
     doc["distanceCm"] = round(_lastLevel.distanceCm * 10) / 10.0;
-    doc["temperatureC"] = _lastLevel.temperatureC;
+    doc["temperatureValid"] = _lastLevel.temperatureValid;
+    if (_lastLevel.temperatureValid) {
+        doc["temperatureC"] = _lastLevel.temperatureC;
+    }
+    if (_lastLevel.humidityValid) {
+        doc["humidityPct"] = round(_lastLevel.humidityPct * 10) / 10.0;
+    }
     
     // Status
     doc["valid"] = _lastLevel.valid;
@@ -422,8 +421,14 @@ String TankCalculator::getMQTTJson(const String& timestamp) const {
     if (_lastLevel.sensorOk) {
         sensor["distanceCm"] = round(_lastLevel.distanceCm * 10) / 10.0;
         sensor["distanceMm"] = round(_lastLevel.distanceMm);
+    }
+    if (_lastLevel.temperatureValid) {
         sensor["temperatureC"] = _lastLevel.temperatureC;
-    } else {
+    }
+    if (_lastLevel.humidityValid) {
+        sensor["humidityPct"] = round(_lastLevel.humidityPct * 10) / 10.0;
+    }
+    if (!_lastLevel.sensorOk) {
         sensor["status"] = "not_responding";
         sensor["errorCode"] = static_cast<uint16_t>(_lastLevel.error);
         sensor["errorName"] = ErrorHandler::getInstance().getErrorName(_lastLevel.error);

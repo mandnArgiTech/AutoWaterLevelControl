@@ -26,6 +26,11 @@ ISensor* SensorFactory::createSensor(const SensorHWConfig& config) {
         Serial.printf("[SensorFactory] US-100 on RX=%d, TX=%d\n", config.rxPin, config.txPin);
         return new UltrasonicSensor(config.rxPin, config.txPin);
     }
+
+    if (type == "A02YYUW" || type == "A02-YYUW" || type == "DYP-A02YYUW") {
+        Serial.printf("[SensorFactory] A02YYUW on RX=%d, TX=%d\n", config.rxPin, config.txPin);
+        return new A02YYUWSensor(config.rxPin, config.txPin);
+    }
     
     if (type == "HC_SR04" || type == "HCSR04" || type == "HC-SR04") {
         Serial.printf("[SensorFactory] HC-SR04 on TRIG=%d, ECHO=%d\n", config.trigPin, config.echoPin);
@@ -48,39 +53,6 @@ ISensor* SensorFactory::createSensor(const SensorHWConfig& config) {
     return nullptr;
 }
 
-ISensor* SensorFactory::createSensorByType(const String& typeStr) {
-    SensorHWConfig config;
-    getDefaultPins(typeStr, config);
-    config.type = typeStr;
-    return createSensor(config);
-}
-
-ISensor* SensorFactory::createSensorFromString(const String& typeStr, int pin1, int pin2, 
-                                               float tankHeight) {
-    SensorHWConfig config;
-    config.type = typeStr;
-    
-    String type = normalizeType(typeStr);
-    
-    if (type == "US100" || type == "US-100" || type == "TF_LUNA" || type == "TFLUNA" || type == "TF-LUNA") {
-        config.rxPin = pin1;
-        config.txPin = pin2;
-    } else if (type == "HC_SR04" || type == "HCSR04" || type == "HC-SR04") {
-        config.trigPin = pin1;
-        config.echoPin = pin2;
-    } else if (type == "XKC_KD200" || type == "XKCKD200" || type == "XKC-KD200") {
-        config.signalPin = pin1;
-        config.mountHeightMm = DEFAULT_MOUNT_HEIGHT_MM;
-        config.tankHeightMm = tankHeight;
-        config.invertedLogic = false;
-    } else {
-        config.rxPin = pin1;
-        config.txPin = pin2;
-    }
-    
-    return createSensor(config);
-}
-
 // =============================================================================
 // SECTION 2: TYPE HELPERS
 // =============================================================================
@@ -89,14 +61,6 @@ String SensorFactory::normalizeType(const String& typeStr) {
     String upper = typeStr;
     upper.toUpperCase();
     return upper;
-}
-
-bool SensorFactory::isValidType(const String& typeStr) {
-    String type = normalizeType(typeStr);
-    return (type == "US100" || type == "US-100" ||
-            type == "HC_SR04" || type == "HCSR04" || type == "HC-SR04" ||
-            type == "TF_LUNA" || type == "TFLUNA" || type == "TF-LUNA" ||
-            type == "XKC_KD200" || type == "XKCKD200" || type == "XKC-KD200");
 }
 
 // =============================================================================
@@ -115,35 +79,3 @@ void SensorFactory::getDefaultPins(const String& typeStr, SensorHWConfig& config
     config.type = typeStr;
 }
 
-String SensorFactory::getSupportedTypes() {
-    JsonDocument doc;
-    JsonArray arr = doc.to<JsonArray>();
-    
-    JsonObject us100 = arr.add<JsonObject>();
-    us100["type"] = "US100";
-    us100["name"] = "US-100 Ultrasonic";
-    us100["interface"] = "UART";
-    us100["range"] = "20-4500mm";
-    
-    JsonObject hcsr04 = arr.add<JsonObject>();
-    hcsr04["type"] = "HC_SR04";
-    hcsr04["name"] = "HC-SR04 Ultrasonic";
-    hcsr04["interface"] = "Trigger/Echo";
-    hcsr04["range"] = "20-4000mm";
-    
-    JsonObject tfluna = arr.add<JsonObject>();
-    tfluna["type"] = "TF_LUNA";
-    tfluna["name"] = "TF-Luna LiDAR";
-    tfluna["interface"] = "UART";
-    tfluna["range"] = "200-8000mm";
-    
-    JsonObject xkckd200 = arr.add<JsonObject>();
-    xkckd200["type"] = "XKC_KD200";
-    xkckd200["name"] = "XKC-KD200 IR Level";
-    xkckd200["interface"] = "Digital";
-    xkckd200["range"] = "Point-level";
-    
-    String output;
-    serializeJson(doc, output);
-    return output;
-}

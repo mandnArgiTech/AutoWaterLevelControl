@@ -9,6 +9,8 @@
 #include "MQTTManager.h"
 #include "../version.h"
 #include "../utils/Log.h"
+#include "../utils/TimeManager.h"
+#include <LittleFS.h>
 
 MQTTManager* MQTTManager::_instance = nullptr;
 
@@ -26,7 +28,12 @@ MQTTManager& MQTTManager::getInstance() {
 // =============================================================================
 
 MQTTManager::MQTTManager()
-    : _mqttClient(_wifiClient)
+    : _secureClient(nullptr)
+    , _caCerts(nullptr)
+    , _tlsSession(nullptr)
+    , _useTls(false)
+    , _tlsNeedsTime(false)
+    , _mqttClient(_wifiClient)
     , _initialized(false)
     , _state(MQTTState::DISABLED)
     , _messageCallback(nullptr)
@@ -63,12 +70,21 @@ ErrorCode MQTTManager::begin() {
 
     buildDeviceTag();
 
+    if (config.tls) {
+        if (!setupTls(config)) {
+            setState(MQTTState::DISABLED);
+            return ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_INIT, "TLS setup failed");
+        }
+        _mqttClient.setClient(*_secureClient);
+    }
+
     _mqttClient.setServer(config.server.c_str(), config.port);
     _mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
-    _mqttClient.setKeepAlive(MQTT_KEEPALIVE);
+    _mqttClient.setKeepAlive(FLM_MQTT_KEEPALIVE_S);
     _mqttClient.setCallback(mqttCallback);
 
-    FLM_LOG_INFO("MQTT", "broker %s:%u", config.server.c_str(), (unsigned)config.port);
+    FLM_LOG_INFO("MQTT", "broker %s:%u%s", config.server.c_str(), (unsigned)config.port,
+                 config.tls ? " (TLS)" : "");
     FLM_LOG_DEBUG("MQTT", "device %s client %s", _deviceTag.c_str(), _uniqueClientId.c_str());
 
     setState(MQTTState::DISCONNECTED);
@@ -96,6 +112,76 @@ void MQTTManager::buildDeviceTag() {
 }
 
 // =============================================================================
+// SECTION 4b: TLS SETUP
+// =============================================================================
+
+/**
+ * Configure BearSSL for the ESP8266's tight heap:
+ * - MFLN buffers (1 KB instead of 16 KB) — the single fix that stops the
+ *   OOM crash/reboot loop when TLS is enabled. Requires broker-side MFLN
+ *   support (any OpenSSL 1.1.1+ based broker, e.g. Mosquitto on a VPS).
+ * - TLS session cache — resumed handshakes skip the expensive asymmetric
+ *   crypto: reconnects go from seconds to ~100 ms with minimal heap churn.
+ * - TLS 1.2 only — drops legacy protocol code paths.
+ */
+bool MQTTManager::setupTls(const MQTTConfig& config) {
+    _secureClient = new BearSSL::WiFiClientSecure();
+    _secureClient->setBufferSizes(FLM_TLS_RX_BUF, FLM_TLS_TX_BUF);
+    _secureClient->setSSLVersion(BR_TLS12, BR_TLS12);
+
+    _tlsSession = new BearSSL::Session();
+    _secureClient->setSession(_tlsSession);
+
+    if (config.tlsMode == "ca") {
+        File f = LittleFS.open(MQTT_CA_FILE, "r");
+        if (!f) {
+            FLM_LOG_ERROR("MQTT", "tlsMode=ca but %s not found on LittleFS", MQTT_CA_FILE);
+            return false;
+        }
+        String pem = f.readString();
+        f.close();
+        _caCerts = new BearSSL::X509List(pem.c_str());
+        if (_caCerts->getCount() == 0) {
+            FLM_LOG_ERROR("MQTT", "no valid certificate in %s", MQTT_CA_FILE);
+            return false;
+        }
+        _secureClient->setTrustAnchors(_caCerts);
+        _tlsNeedsTime = true;  // X.509 validity check needs a real clock (NTP)
+        FLM_LOG_INFO("MQTT", "TLS: CA validation, %u cert(s)", (unsigned)_caCerts->getCount());
+    } else if (config.tlsMode == "fingerprint") {
+        if (config.fingerprint.length() == 0
+            || !_secureClient->setFingerprint(config.fingerprint.c_str())) {
+            FLM_LOG_ERROR("MQTT", "invalid TLS fingerprint '%s'", config.fingerprint.c_str());
+            return false;
+        }
+        FLM_LOG_INFO("MQTT", "TLS: fingerprint pinning");
+    } else {
+        _secureClient->setInsecure();
+        FLM_LOG_WARN("MQTT", "TLS: encrypted but certificate NOT validated");
+    }
+
+    _useTls = true;
+    return true;
+}
+
+bool MQTTManager::tlsReady() {
+    // Cert validity check fails with an unset clock — wait for NTP first.
+    if (_tlsNeedsTime && !TimeManager::getInstance().isSynchronized()) {
+        FLM_LOG_DEBUG("MQTT", "TLS waiting for NTP sync");
+        return false;
+    }
+    // A BearSSL handshake needs ~13 KB peak; attempting it with less heap
+    // is exactly the OOM → panic → reboot loop. Defer instead of crashing.
+    uint32_t freeHeap = ESP.getFreeHeap();
+    if (freeHeap < FLM_TLS_MIN_FREE_HEAP) {
+        FLM_LOG_WARN("MQTT", "TLS deferred: heap %u < %u", freeHeap,
+                     (unsigned)FLM_TLS_MIN_FREE_HEAP);
+        return false;
+    }
+    return true;
+}
+
+// =============================================================================
 // SECTION 5: CONNECTION MANAGEMENT
 // =============================================================================
 
@@ -103,10 +189,22 @@ ErrorCode MQTTManager::connect() {
     if (_state == MQTTState::DISABLED) {
         return ErrorCode::ERR_MQTT_DISABLED;
     }
+    if (!WiFi.isConnected()) {
+        setState(MQTTState::DISCONNECTED);
+        return ErrorCode::ERR_MQTT_CONNECT;
+    }
+    if (_useTls && !tlsReady()) {
+        // Re-arm the retry timer so checkConnection() doesn't call us every
+        // loop iteration; keep the current backoff (this is not a failure).
+        _lastConnectAttempt = millis();
+        return ErrorCode::ERR_MQTT_CONNECT;
+    }
 
     MQTTConfig& config = ConfigManager::getInstance().getMQTTConfig();
 
-    FLM_LOG_INFO("MQTT", "connecting %s:%u", config.server.c_str(), (unsigned)config.port);
+    FLM_LOG_INFO("MQTT", "connecting %s:%u%s heap=%u", config.server.c_str(),
+                 (unsigned)config.port, _useTls ? " TLS" : "",
+                 (unsigned)ESP.getFreeHeap());
     setState(MQTTState::CONNECTING);
     _lastConnectAttempt = millis();
 
@@ -148,6 +246,15 @@ ErrorCode MQTTManager::connect() {
     if (next < MQTT_RECONNECT_INTERVAL) next = MQTT_RECONNECT_INTERVAL;
     if (next > MQTT_RECONNECT_MAX_MS) next = MQTT_RECONNECT_MAX_MS;
     _reconnectDelayMs = next;
+
+    if (_useTls && _secureClient) {
+        char sslErr[80];
+        int sslCode = _secureClient->getLastSSLError(sslErr, sizeof(sslErr));
+        if (sslCode != 0) {
+            FLM_LOG_ERROR("MQTT", "TLS error %d: %s (heap %u)", sslCode, sslErr,
+                          (unsigned)ESP.getFreeHeap());
+        }
+    }
 
     int st = _mqttClient.state();
     const char* reason = "unknown";
@@ -219,6 +326,9 @@ void MQTTManager::checkConnection() {
     }
 
     if (_state == MQTTState::DISCONNECTED) {
+        // PubSubClient::connect() blocks for DNS + TCP; never attempt it
+        // without WiFi or every retry stalls the main loop on a TCP timeout.
+        if (!WiFi.isConnected()) return;
         if ((unsigned long)(millis() - _lastConnectAttempt) >= _reconnectDelayMs) {
             connect();
         }
@@ -285,7 +395,7 @@ bool MQTTManager::subscribe(const String& subtopic) {
     bool success = _mqttClient.subscribe(fullTopic.c_str());
 
     if (success) {
-        Serial.printf("[MQTTManager] Subscribed to %s\n", fullTopic.c_str());
+        FLM_LOG_INFO("MQTT", "subscribed %s", fullTopic.c_str());
     } else {
         ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_SUBSCRIBE, fullTopic);
     }
@@ -301,16 +411,13 @@ void MQTTManager::mqttCallback(char* topic, byte* payload, unsigned int length) 
     if (_instance) {
         String topicStr = String(topic);
         String payloadStr;
-        payloadStr.reserve(length);
-        for (unsigned int i = 0; i < length; i++) {
-            payloadStr += (char)payload[i];
-        }
+        payloadStr.concat(reinterpret_cast<const char*>(payload), length);
         _instance->handleMessage(topicStr, payloadStr);
     }
 }
 
 void MQTTManager::handleMessage(const String& topic, const String& payload) {
-    Serial.printf("[MQTTManager] Message: %s = %s\n", topic.c_str(), payload.c_str());
+    FLM_LOG_DEBUG("MQTT", "msg %s = %s", topic.c_str(), payload.c_str());
     if (_messageCallback) {
         _messageCallback(topic, payload);
     }
@@ -359,6 +466,10 @@ String MQTTManager::getStatusJson() {
     doc["connected"] = isConnected();
     doc["server"] = config.server;
     doc["port"] = config.port;
+    doc["tls"] = config.tls;
+    if (config.tls) {
+        doc["tlsMode"] = config.tlsMode;
+    }
     doc["deviceTag"] = _deviceTag;
     doc["deviceName"] = config.deviceName;
     doc["topicPrefix"] = config.topicPrefix;

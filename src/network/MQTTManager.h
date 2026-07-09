@@ -16,6 +16,7 @@
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
 #include <functional>
 #include "../config/ConfigManager.h"
 #include "../utils/ErrorHandler.h"
@@ -23,9 +24,22 @@
 #define MQTT_BUFFER_SIZE        512
 #define MQTT_RECONNECT_INTERVAL 5000
 #define MQTT_RECONNECT_MAX_MS   30000u   // 30s cap — pump control needs fast reconnect
-#ifndef MQTT_KEEPALIVE
-#define MQTT_KEEPALIVE          60
-#endif
+// PubSubClient defines MQTT_KEEPALIVE (15s) before this header can, so use our own name
+#define FLM_MQTT_KEEPALIVE_S    60
+
+// ---------------------------------------------------------------------------
+// TLS (BearSSL) tuning for ESP8266.
+//
+// Default BearSSL buffers are 16 KB — a handshake then needs ~27-30 KB of
+// contiguous heap, which this firmware does not have → OOM → reboot loop.
+// With MFLN (Maximum Fragment Length Negotiation, supported by any
+// OpenSSL 1.1.1+ broker such as Mosquitto on a modern VPS) buffers shrink
+// to 1 KB each and a full handshake fits in ~13 KB peak.
+// ---------------------------------------------------------------------------
+#define FLM_TLS_RX_BUF          1024     ///< BearSSL receive buffer (needs broker MFLN)
+#define FLM_TLS_TX_BUF          1024     ///< BearSSL transmit buffer
+#define FLM_TLS_MIN_FREE_HEAP   16000u   ///< Skip handshake below this — prevents OOM reboot
+#define MQTT_CA_FILE            "/mqtt_ca.pem"  ///< LittleFS path for CA cert (tlsMode=ca)
 
 enum class MQTTState {
     DISABLED,
@@ -77,8 +91,17 @@ private:
     void setState(MQTTState newState);
     void checkConnection();
     void buildDeviceTag();
+    /** Create + configure the TLS client per config. Returns false on fatal config error. */
+    bool setupTls(const MQTTConfig& config);
+    /** True when TLS preconditions (heap, NTP time for cert validation) are met. */
+    bool tlsReady();
 
     WiFiClient _wifiClient;
+    BearSSL::WiFiClientSecure* _secureClient;  // allocated only when TLS enabled
+    BearSSL::X509List* _caCerts;               // parsed CA cert (tlsMode=ca)
+    BearSSL::Session* _tlsSession;             // TLS session cache — fast resumed handshakes
+    bool _useTls;
+    bool _tlsNeedsTime;                        // cert validation requires synced clock
     PubSubClient _mqttClient;
 
     bool _initialized;

@@ -17,7 +17,10 @@
     "clientId": "FluidMonitor",
     "deviceName": "tank1",
     "topicPrefix": "water",
-    "publishInterval": 60000
+    "publishInterval": 60000,
+    "tls": false,
+    "tlsMode": "insecure",
+    "fingerprint": ""
   },
   "tank": {
     "type": "circular",
@@ -29,7 +32,7 @@
   },
   "sensor": {
     "hardware": {
-      "type": "US100",
+      "type": "A02YYUW",
       "rxPin": 5,
       "txPin": 4,
       "trigPin": 5,
@@ -40,8 +43,8 @@
       "invertedLogic": false
     },
     "offsetMm": 50.0,
-    "minDistance": 20.0,
-    "maxDistance": 4500.0,
+    "minDistance": 280.0,
+    "maxDistance": 7500.0,
     "samples": 5,
     "readInterval": 2000,
     "filterEnabled": true,
@@ -49,7 +52,13 @@
     "movingAvgWindow": 10,
     "kalmanEnabled": true,
     "kalmanProcessNoise": 0.01,
-    "kalmanMeasureNoise": 0.1
+    "kalmanMeasureNoise": 0.1,
+    "ambient": {
+      "enabled": true,
+      "type": "DHT11",
+      "pin": 2,
+      "readIntervalMs": 3000
+    }
   },
   "system": {
     "deviceName": "Water Tank Monitor",

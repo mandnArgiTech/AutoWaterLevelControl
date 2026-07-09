@@ -193,7 +193,7 @@ ErrorCode ErrorHandler::logError(ErrorCode code, const String& additionalInfo) {
         _suppressedCount = 0;
     }
     if (shouldPrint) {
-        printError(code, additionalInfo);
+        printResolvedError(name, description, severity, additionalInfo);
     }
     
     // Step 7: Call error callback if set
@@ -218,18 +218,6 @@ ErrorCode ErrorHandler::logError(ErrorCode code, const String& additionalInfo) {
  */
 ErrorCode ErrorHandler::getLastError() const {
     return _lastError;
-}
-
-/**
- * @brief Get last error entry with full details
- * @return Pointer to last error entry or nullptr if no errors
- */
-const ErrorEntry* ErrorHandler::getLastErrorEntry() const {
-    if (_errorCount == 0) {
-        return nullptr;
-    }
-    size_t lastIndex = (_errorIndex == 0) ? MAX_ERROR_HISTORY - 1 : _errorIndex - 1;
-    return &_errorHistory[lastIndex];
 }
 
 /**
@@ -353,43 +341,36 @@ String ErrorHandler::getErrorHistoryJson() const {
     return output;
 }
 
-/**
- * @brief Get specific error info as JSON
- * @param code Error code
- * @return JSON string with error information
- */
-String ErrorHandler::getErrorInfoJson(ErrorCode code) const {
-    JsonDocument doc;
-    
-    doc["code"] = static_cast<uint16_t>(code);
-    doc["name"] = getErrorName(code);
-    doc["severity"] = severityToString(getErrorSeverity(code));
-    doc["description"] = getErrorDescription(code);
-    
-    String output;
-    serializeJson(doc, output);
-    return output;
-}
-
 // =============================================================================
 // SECTION 10: SERIAL OUTPUT
 // =============================================================================
 
 /**
- * @brief Print error to Serial with formatting
+ * @brief Print error to Serial with formatting (single lookup)
  * @param code Error code
  * @param additionalInfo Optional additional info
  */
 void ErrorHandler::printError(ErrorCode code, const String& additionalInfo) const {
-    ErrorSeverity severity = getErrorSeverity(code);
-    
+    String name, description;
+    ErrorSeverity severity;
+    lookupError(code, name, description, severity);
+    printResolvedError(name, description, severity, additionalInfo);
+}
+
+/**
+ * @brief Print an error whose name/description/severity are already resolved.
+ * Avoids re-running the LittleFS-backed lookup from logError().
+ */
+void ErrorHandler::printResolvedError(const String& name, const String& description,
+                                      ErrorSeverity severity,
+                                      const String& additionalInfo) const {
     // Format: [SEVERITY] E<code>: <description> (<additional info>)
     Serial.print(F("["));
     Serial.print(severityToString(severity));
     Serial.print(F("] "));
-    Serial.print(getErrorName(code));
+    Serial.print(name);
     Serial.print(F(": "));
-    Serial.print(getErrorDescription(code));
+    Serial.print(description);
     
     if (additionalInfo.length() > 0) {
         Serial.print(F(" ("));

@@ -101,26 +101,17 @@ public:
     void loop();
     
     /**
-     * @brief Connect to configured WiFi network
+     * @brief Connect to configured WiFi network (blocking, boot-time only).
+     * Runtime reconnection is handled non-blocking inside loop().
      * @return ErrorCode indicating success or failure
      */
     ErrorCode connect();
-    
-    /**
-     * @brief Disconnect from current network
-     */
-    void disconnect();
     
     /**
      * @brief Start Access Point mode with captive portal
      * @return ErrorCode indicating success or failure
      */
     ErrorCode startAP();
-    
-    /**
-     * @brief Stop Access Point mode
-     */
-    void stopAP();
     
     /**
      * @brief Get current WiFi state
@@ -236,7 +227,13 @@ private:
     // Update state and call callback
     void setState(WifiMgrState newState);
     
-    // Check and handle reconnection
+    // Start a connection attempt without waiting (returns after WiFi.begin)
+    ErrorCode beginConnect();
+    
+    // Evaluate the outcome of a connection attempt (success or failure)
+    ErrorCode finishConnect();
+    
+    // Check and handle reconnection (non-blocking state machine)
     void checkConnection();
     
     // Setup mDNS
@@ -249,12 +246,12 @@ private:
     void setupCaptivePortal();
     
     // Member variables
-    bool _initialized;              ///< Initialization flag
     WifiMgrState _state;            ///< Current state
     WiFiCallback _stateCallback;    ///< State change callback
     OTAPrepareCallback _otaPrepareCallback;
     OTAErrorCallback _otaErrorCallback;
     unsigned long _lastConnectAttempt;  ///< Last connection attempt time
+    unsigned long _connectStartMs;      ///< When the current CONNECTING attempt started
     unsigned long _reconnectInterval;   ///< Reconnection interval
     uint8_t _reconnectCount;        ///< Reconnection attempt count
     bool _otaInProgress;            ///< OTA update in progress

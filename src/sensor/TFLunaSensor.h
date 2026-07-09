@@ -40,7 +40,6 @@ public:
     String getStatusJson() const override;
 
     uint16_t getSignalStrength() const { return _signalStrength; }
-    bool setFrameRate(uint16_t fps);
 
 protected:
     uint16_t getSampleDelay() const override { return 10; }

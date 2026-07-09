@@ -61,8 +61,9 @@ public:
     void loop();
     
     /**
-     * @brief Force NTP synchronization
-     * @return ErrorCode indicating success or failure
+     * @brief Request NTP synchronization (non-blocking).
+     * SNTP syncs in the background; loop() observes the result.
+     * @return ErrorCode::ERR_NONE (request accepted)
      */
     ErrorCode syncTime();
     
@@ -141,6 +142,7 @@ private:
     // Member variables
     bool _initialized;              ///< Initialization flag
     bool _synchronized;             ///< Sync status
+    bool _syncPending;              ///< Waiting for SNTP to deliver valid time
     unsigned long _lastSyncAttempt; ///< Last sync attempt time
     unsigned long _lastSyncSuccess; ///< Last successful sync time
     int32_t _timezoneOffset;        ///< Timezone offset in seconds

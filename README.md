@@ -172,6 +172,22 @@ Commands (example topic suffix `…/command`):
 
 Reconnect uses **exponential backoff** (capped). Details: [doc/API_REFERENCE.md](doc/API_REFERENCE.md), [doc/USER_GUIDE.md](doc/USER_GUIDE.md).
 
+### MQTT over TLS
+
+Set in the `mqtt` config section (web UI, `POST /api/config/mqtt`, or `config.json`):
+
+```json
+{"tls": true, "port": 8883, "tlsMode": "insecure"}
+```
+
+| `tlsMode` | Validation | Notes |
+|---|---|---|
+| `insecure` | none (traffic still encrypted) | Default; no setup needed |
+| `fingerprint` | SHA-1 cert pinning | Set `fingerprint` (e.g. `"AA:BB:…"`); must be updated on cert renewal |
+| `ca` | full X.509 chain | Upload CA PEM via `POST /api/mqtt/ca` (body = PEM); waits for NTP sync before connecting |
+
+TLS is tuned for the ESP8266's small heap: **MFLN 1 KB buffers** (broker must support MFLN — any OpenSSL 1.1.1+ based broker such as Mosquitto on a modern VPS does), **TLS 1.2 only**, **session resumption** (reconnects skip the slow handshake), and a **free-heap guard** that defers the handshake instead of crashing when memory is low. First handshake takes ~1–3 s (CPU runs at 160 MHz to halve this); resumed handshakes are near-instant.
+
 ---
 
 ## WebSocket calibration
@@ -243,7 +259,7 @@ FluidLevelMonitor/
 
 - **No HTTP authentication** — treat the device as **trusted LAN only** (or isolate VLAN / firewall).
 - Change default **AP password** before deployment.
-- Use **MQTT TLS** only if you add a TLS-capable stack/client (not in default PubSubClient plain TCP path).
+- **MQTT TLS** is built in (BearSSL); prefer `tlsMode: "ca"` or `"fingerprint"` over `"insecure"` when the broker is on the public internet.
 - Rotate any **Git remote credentials** if they were ever embedded in URLs.
 
 ---

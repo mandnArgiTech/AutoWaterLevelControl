@@ -149,21 +149,6 @@ bool TFLunaSensor::testConnection() {
     return readRawDistanceMm() > 0;
 }
 
-bool TFLunaSensor::setFrameRate(uint16_t fps) {
-    if (fps < 1) fps = 1;
-    if (fps > 250) fps = 250;
-
-    uint8_t cmd[6] = {0x5A, 0x06, 0x03,
-                      (uint8_t)(fps & 0xFF),
-                      (uint8_t)((fps >> 8) & 0xFF), 0};
-    cmd[5] = cmd[0] + cmd[1] + cmd[2] + cmd[3] + cmd[4];
-
-    if (_serial) _serial->write(cmd, 6);
-    delay(10);
-    Serial.printf("[TF-Luna] Frame rate → %d Hz\n", fps);
-    return true;
-}
-
 String TFLunaSensor::getStatusJson() const {
     JsonDocument doc;
     doc["type"] = getSensorTypeName();

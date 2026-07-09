@@ -140,6 +140,9 @@ void ConfigManager::setDefaultMQTTConfig() {
     _mqttConfig.deviceName = DEFAULT_MQTT_DEVICE_NAME;
     _mqttConfig.topicPrefix = DEFAULT_MQTT_TOPIC_PREFIX;
     _mqttConfig.publishInterval = DEFAULT_MQTT_PUBLISH_INTERVAL;
+    _mqttConfig.tls = DEFAULT_MQTT_TLS;
+    _mqttConfig.tlsMode = DEFAULT_MQTT_TLS_MODE;
+    _mqttConfig.fingerprint = DEFAULT_MQTT_FINGERPRINT;
 }
 
 void ConfigManager::setDefaultTankConfig() {
@@ -179,6 +182,11 @@ void ConfigManager::setDefaultSensorConfig() {
     _sensorConfig.kalmanEnabled = DEFAULT_KALMAN_ENABLED;
     _sensorConfig.kalmanProcessNoise = DEFAULT_KALMAN_PROCESS_Q;
     _sensorConfig.kalmanMeasureNoise = DEFAULT_KALMAN_MEASURE_R;
+
+    _sensorConfig.ambient.enabled = DEFAULT_AMBIENT_ENABLED;
+    _sensorConfig.ambient.type = DEFAULT_AMBIENT_TYPE;
+    _sensorConfig.ambient.pin = DEFAULT_DHT11_PIN;
+    _sensorConfig.ambient.readIntervalMs = DEFAULT_DHT11_READ_INTERVAL;
 }
 
 void ConfigManager::setDefaultSystemConfig() {
@@ -451,6 +459,10 @@ void ConfigManager::applyNumericClamps() {
     if (_systemConfig.webPort == 0 || _systemConfig.webPort > 65535) _systemConfig.webPort = DEFAULT_WEB_PORT;
     if (_mqttConfig.publishInterval < 5000UL) _mqttConfig.publishInterval = 5000UL;
     if (_mqttConfig.publishInterval > 86400000UL) _mqttConfig.publishInterval = 86400000UL;
+    if (_mqttConfig.tlsMode != "insecure" && _mqttConfig.tlsMode != "fingerprint"
+        && _mqttConfig.tlsMode != "ca") {
+        _mqttConfig.tlsMode = DEFAULT_MQTT_TLS_MODE;
+    }
     if (_sensorConfig.readInterval < 200UL) _sensorConfig.readInterval = 200UL;
     if (_sensorConfig.readInterval > 600000UL) _sensorConfig.readInterval = 600000UL;
     if (_sensorConfig.samples < 1) _sensorConfig.samples = 1;
@@ -463,6 +475,10 @@ void ConfigManager::applyNumericClamps() {
     if (_sensorConfig.kalmanMeasureNoise < 1e-6f) _sensorConfig.kalmanMeasureNoise = 1e-6f;
     if (_sensorConfig.minDistance < 1.f) _sensorConfig.minDistance = 1.f;
     if (_sensorConfig.maxDistance > 10000.f) _sensorConfig.maxDistance = 10000.f;
+    if (_sensorConfig.ambient.readIntervalMs < 2000u)
+        _sensorConfig.ambient.readIntervalMs = 2000u;
+    if (_sensorConfig.ambient.readIntervalMs > 60000u)
+        _sensorConfig.ambient.readIntervalMs = 60000u;
     if (_motorConfig.pumpOnPercent < 0.f) _motorConfig.pumpOnPercent = 0.f;
     if (_motorConfig.pumpOnPercent > 100.f) _motorConfig.pumpOnPercent = 100.f;
     if (_motorConfig.pumpOffPercent < 0.f) _motorConfig.pumpOffPercent = 0.f;
@@ -529,6 +545,9 @@ void ConfigManager::parseMQTTConfig(const JsonObject& obj) {
     _mqttConfig.deviceName = obj["deviceName"] | DEFAULT_MQTT_DEVICE_NAME;
     _mqttConfig.topicPrefix = obj["topicPrefix"] | DEFAULT_MQTT_TOPIC_PREFIX;
     _mqttConfig.publishInterval = obj["publishInterval"] | DEFAULT_MQTT_PUBLISH_INTERVAL;
+    _mqttConfig.tls = obj["tls"] | DEFAULT_MQTT_TLS;
+    _mqttConfig.tlsMode = obj["tlsMode"] | DEFAULT_MQTT_TLS_MODE;
+    _mqttConfig.fingerprint = obj["fingerprint"] | DEFAULT_MQTT_FINGERPRINT;
 }
 
 void ConfigManager::parseTankConfig(const JsonObject& obj) {
@@ -587,6 +606,19 @@ void ConfigManager::parseSensorConfig(const JsonObject& obj) {
     _sensorConfig.kalmanEnabled = obj["kalmanEnabled"] | DEFAULT_KALMAN_ENABLED;
     _sensorConfig.kalmanProcessNoise = obj["kalmanProcessNoise"] | DEFAULT_KALMAN_PROCESS_Q;
     _sensorConfig.kalmanMeasureNoise = obj["kalmanMeasureNoise"] | DEFAULT_KALMAN_MEASURE_R;
+
+    if (obj["ambient"].is<JsonObject>()) {
+        JsonObject amb = obj["ambient"];
+        _sensorConfig.ambient.enabled = amb["enabled"] | DEFAULT_AMBIENT_ENABLED;
+        _sensorConfig.ambient.type = amb["type"] | DEFAULT_AMBIENT_TYPE;
+        _sensorConfig.ambient.pin = amb["pin"] | DEFAULT_DHT11_PIN;
+        _sensorConfig.ambient.readIntervalMs = amb["readIntervalMs"] | DEFAULT_DHT11_READ_INTERVAL;
+    } else {
+        _sensorConfig.ambient.enabled = obj["dht11Enabled"] | DEFAULT_AMBIENT_ENABLED;
+        _sensorConfig.ambient.type = DEFAULT_AMBIENT_TYPE;
+        _sensorConfig.ambient.pin = obj["dht11Pin"] | DEFAULT_DHT11_PIN;
+        _sensorConfig.ambient.readIntervalMs = DEFAULT_DHT11_READ_INTERVAL;
+    }
 }
 
 void ConfigManager::parseSystemConfig(const JsonObject& obj) {
@@ -647,6 +679,9 @@ void ConfigManager::serializeMQTTConfig(JsonObject& obj) const {
     obj["deviceName"] = _mqttConfig.deviceName;
     obj["topicPrefix"] = _mqttConfig.topicPrefix;
     obj["publishInterval"] = _mqttConfig.publishInterval;
+    obj["tls"] = _mqttConfig.tls;
+    obj["tlsMode"] = _mqttConfig.tlsMode;
+    obj["fingerprint"] = _mqttConfig.fingerprint;
 }
 
 void ConfigManager::serializeTankConfig(JsonObject& obj) const {
@@ -687,6 +722,12 @@ void ConfigManager::serializeSensorConfig(JsonObject& obj) const {
     obj["kalmanEnabled"] = _sensorConfig.kalmanEnabled;
     obj["kalmanProcessNoise"] = _sensorConfig.kalmanProcessNoise;
     obj["kalmanMeasureNoise"] = _sensorConfig.kalmanMeasureNoise;
+
+    JsonObject amb = obj["ambient"].to<JsonObject>();
+    amb["enabled"] = _sensorConfig.ambient.enabled;
+    amb["type"] = _sensorConfig.ambient.type;
+    amb["pin"] = _sensorConfig.ambient.pin;
+    amb["readIntervalMs"] = _sensorConfig.ambient.readIntervalMs;
 }
 
 void ConfigManager::serializeSystemConfig(JsonObject& obj) const {

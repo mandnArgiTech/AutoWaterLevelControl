@@ -41,9 +41,14 @@ private:
     };
     enum class SmsJob : uint8_t { None, On, Off };
 
+    enum class GsmInitPhase : uint8_t {
+        Idle,           ///< Not initializing (either done, or waiting for retry window)
+        WaitAtOk,       ///< Sent "AT", waiting for OK
+        WaitCmgfOk      ///< Sent "AT+CMGF=1", waiting for OK
+    };
+
     void flushGsm();
-    bool initGsmBlocking();
-    void tryGsmInit();
+    void pollGsmInit();
     void pollSmsFsm();
     void startSmsJob(SmsJob job, const String& body);
     void onSmsSuccess();
@@ -60,6 +65,9 @@ private:
     bool           _initialized   = false;
     bool           _gsmOk         = false;
     unsigned long  _nextGsmInitMs = 0;
+    GsmInitPhase   _gsmInitPhase  = GsmInitPhase::Idle;
+    unsigned long  _gsmInitDeadline = 0;
+    String         _gsmInitRx;
     bool           _dryRunBlocked = false;
     bool           _lastSmsSent   = false;
     String         _lastSmsError;

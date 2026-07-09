@@ -67,6 +67,7 @@ enum class SensorType {
     UNKNOWN = 0,
     ULTRASONIC_US100,       ///< US-100 Ultrasonic sensor (serial mode)
     ULTRASONIC_HCSR04,      ///< HC-SR04 Ultrasonic sensor (pulse mode)
+    ULTRASONIC_A02YYUW,     ///< DYP-A02YYUW Ultrasonic (UART auto-frame)
     INFRARED,               ///< Infrared distance sensor
     LASER_LIDAR,            ///< Laser/LIDAR sensor
     TOF                     ///< Time-of-Flight sensor (VL53L0X, etc.)
@@ -107,15 +108,6 @@ public:
      * @return Distance in millimeters, or -1 on error
      */
     virtual float readDistanceMm() = 0;
-    
-    /**
-     * @brief Read distance in centimeters
-     * @return Distance in centimeters, or -1 on error
-     */
-    virtual float readDistanceCm() {
-        float mm = readDistanceMm();
-        return (mm > 0) ? mm / 10.0f : -1;
-    }
     
     /**
      * @brief Read distance with averaging
@@ -204,6 +196,9 @@ public:
                                  uint8_t /*avgWindow*/, bool /*kalmanEnabled*/,
                                  float /*kalmanQ*/, float /*kalmanR*/) {}
 
+    /** Non-blocking poll (UART parsers). Default no-op. Call every main loop(). */
+    virtual void poll() {}
+
 protected:
     float _calibrationOffset = 0;   ///< Calibration offset in mm
 };
@@ -221,6 +216,7 @@ inline String sensorTypeToString(SensorType type) {
     switch (type) {
         case SensorType::ULTRASONIC_US100:  return "US-100 Ultrasonic";
         case SensorType::ULTRASONIC_HCSR04: return "HC-SR04 Ultrasonic";
+        case SensorType::ULTRASONIC_A02YYUW: return "A02YYUW Ultrasonic";
         case SensorType::INFRARED:          return "Infrared";
         case SensorType::LASER_LIDAR:       return "Laser/LIDAR";
         case SensorType::TOF:               return "Time-of-Flight";

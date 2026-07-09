@@ -10,6 +10,7 @@
 #include "utils/TimeManager.h"
 #include "sensor/ISensor.h"
 #include "sensor/SensorFactory.h"
+#include "sensor/DHT11Ambient.h"
 #include "tank/TankCalculator.h"
 #include "network/WiFiManager.h"
 #include "network/MQTTManager.h"
@@ -26,6 +27,7 @@
 #endif
 
 ISensor*              activeSensor   = nullptr;
+DHT11Ambient*         ambientSensor  = nullptr;
 TankCalculator*       calculator     = nullptr;
 WebServerManager*     webServer      = nullptr;
 CalibrationWebSocket* calibrationWS  = nullptr;
@@ -83,10 +85,10 @@ void initializeSystem() {
 
     activeSensor = SensorFactory::createSensor(sensorCfg.hardware);
     if (!activeSensor) {
-        Serial.println(F("ERROR: factory returned nullptr — creating default US-100"));
+        Serial.println(F("ERROR: factory returned nullptr — creating default A02YYUW"));
         SensorHWConfig defCfg;
-        SensorFactory::getDefaultPins("US100", defCfg);
-        defCfg.type = "US100";
+        SensorFactory::getDefaultPins("A02YYUW", defCfg);
+        defCfg.type = "A02YYUW";
         activeSensor = SensorFactory::createSensor(defCfg);
         if (!activeSensor) {
             Serial.println(F("FATAL: sensor allocation failed — halting"));
@@ -112,8 +114,20 @@ void initializeSystem() {
         sensorCfg.kalmanProcessNoise,
         sensorCfg.kalmanMeasureNoise);
 
+    if (sensorCfg.ambient.enabled) {
+        Serial.println(F("\n>>> Ambient sensor (DHT11)..."));
+        ambientSensor = new DHT11Ambient(sensorCfg.ambient.pin);
+        if (ambientSensor) {
+            ambientSensor->setReadIntervalMs(sensorCfg.ambient.readIntervalMs);
+            result = ambientSensor->begin();
+            if (result != ErrorCode::ERR_NONE) {
+                Serial.println(F("WARNING: DHT11 init had issues"));
+            }
+        }
+    }
+
     Serial.println(F("\n>>> Tank Calculator..."));
-    calculator = new TankCalculator(*activeSensor);
+    calculator = new TankCalculator(*activeSensor, ambientSensor);
     if (!calculator) {
         Serial.println(F("FATAL: calculator allocation failed — halting"));
         while (true) { delay(1000); yield(); }
@@ -210,9 +224,11 @@ void processLoop() {
     if (webServer) webServer->loop();
     if (calibrationWS) calibrationWS->loop();
 
+    if (activeSensor) activeSensor->poll();
+
 #if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
     float motorPct = -1.f;
-    WaterLevel lv = calculator->getLastLevel();
+    const WaterLevel& lv = calculator->getLastLevel();
     if (lv.sensorOk && lv.valid) motorPct = lv.percentFilled;
     if (flmMotor) flmMotor->loop(motorPct);
 #endif
@@ -273,6 +289,13 @@ void readSensor() {
     } else if (level.valid) {
         Serial.printf("[Main] %.1f%% filled  Height: %.1f cm  Dist: %.1f cm\n",
                       level.percentFilled, level.waterHeightCm, level.distanceCm);
+        if (level.temperatureValid) {
+            Serial.printf("[Main] Temp: %.1f C", level.temperatureC);
+            if (level.humidityValid) {
+                Serial.printf("  Humidity: %.1f%%", level.humidityPct);
+            }
+            Serial.println();
+        }
     }
 }
 
@@ -295,7 +318,7 @@ void publishMQTT() {
     bool ok = MQTTManager::getInstance().publishWaterLevel(json);
 
     if (ok && ConfigManager::getInstance().getSystemConfig().debugEnabled) {
-        WaterLevel last = calculator->getLastLevel();
+        const WaterLevel& last = calculator->getLastLevel();
         if (last.sensorOk) {
             Serial.println(F("[Main] MQTT published"));
         } else {
@@ -305,7 +328,7 @@ void publishMQTT() {
 }
 
 void printStatus() {
-    WaterLevel level = calculator->getLastLevel();
+    const WaterLevel& level = calculator->getLastLevel();
 
     Serial.println(F("--- Status ---"));
     Serial.printf("Sensor: %s | %s\n",
@@ -322,6 +345,14 @@ void printStatus() {
     } else if (!level.sensorOk) {
         Serial.printf("Error: %s\n",
                       ErrorHandler::getInstance().getErrorDescription(level.error).c_str());
+    }
+
+    if (level.temperatureValid) {
+        Serial.printf("Ambient: %.1f C", level.temperatureC);
+        if (level.humidityValid) {
+            Serial.printf("  %.1f%% RH", level.humidityPct);
+        }
+        Serial.println();
     }
 
     Serial.printf("WiFi: %s | MQTT: %s\n",

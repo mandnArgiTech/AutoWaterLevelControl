@@ -116,6 +116,8 @@ private:
     void handleApiConfigPost();
     void handleApiConfigSectionGet();
     void handleApiConfigSectionPost();
+    void handleApiMQTTCaPost();
+    void handleApiMQTTCaDelete();
     
     // API handlers - WiFi
     void handleApiWiFiStatus();

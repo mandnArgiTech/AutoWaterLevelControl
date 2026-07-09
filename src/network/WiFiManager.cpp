@@ -31,12 +31,12 @@ WiFiManager& WiFiManager::getInstance() {
  * @brief Private constructor - initializes member variables
  */
 WiFiManager::WiFiManager()
-    : _initialized(false)
-    , _state(WifiMgrState::DISCONNECTED)
+    : _state(WifiMgrState::DISCONNECTED)
     , _stateCallback(nullptr)
     , _otaPrepareCallback(nullptr)
     , _otaErrorCallback(nullptr)
     , _lastConnectAttempt(0)
+    , _connectStartMs(0)
     , _reconnectInterval(30000)  // 30 seconds
     , _reconnectCount(0)
     , _otaInProgress(false)
@@ -86,7 +86,6 @@ ErrorCode WiFiManager::begin() {
     // Step 6: Setup OTA
     setupOTA();
     
-    _initialized = true;
     FLM_LOG_INFO("WiFi", "ready");
     
     return ErrorCode::ERR_NONE;
@@ -97,13 +96,13 @@ ErrorCode WiFiManager::begin() {
 // =============================================================================
 
 /**
- * @brief Connect to configured WiFi network
- * @return ErrorCode indicating success or failure
+ * @brief Start a connection attempt without waiting for the result.
+ * Result is evaluated by finishConnect() — either from the blocking boot-time
+ * connect() or from the non-blocking checkConnection() state machine.
  */
-ErrorCode WiFiManager::connect() {
+ErrorCode WiFiManager::beginConnect() {
     WiFiConfig& config = ConfigManager::getInstance().getWiFiConfig();
     
-    // Step 1: Check if SSID is configured
     if (config.ssid.length() == 0) {
         FLM_LOG_WARN("WiFi", "no SSID");
         return ErrorHandler::getInstance().logError(ErrorCode::ERR_WIFI_NO_SSID);
@@ -112,7 +111,7 @@ ErrorCode WiFiManager::connect() {
     FLM_LOG_INFO("WiFi", "connecting to %s", config.ssid.c_str());
     setState(WifiMgrState::CONNECTING);
     
-    // Step 2: Stop AP if running - properly stop DNS server first
+    // Stop AP if running - properly stop DNS server first
     if (_dnsServer) {
         _dnsServer->stop();  // Stop before delete to prevent leaks
         delete _dnsServer;
@@ -120,54 +119,59 @@ ErrorCode WiFiManager::connect() {
     }
     WiFi.softAPdisconnect(true);
     
-    // Step 3: Disconnect if already connected
     if (WiFi.isConnected()) {
         WiFi.disconnect();
         delay(100);
     }
     
-    // Step 4: Set mode and start connection
     WiFi.mode(WIFI_STA);
     WiFi.begin(config.ssid.c_str(), config.password.c_str());
     _lastConnectAttempt = millis();
+    _connectStartMs = millis();
     
-    // Step 5: Wait for connection with timeout
-    unsigned long startTime = millis();
-    while (!WiFi.isConnected() && (millis() - startTime) < config.connectTimeout) {
-        delay(500);
-        Serial.print(".");
-        yield();  // Allow background tasks
-    }
-    Serial.println();
-    
-    // Step 6: Check connection result
+    return ErrorCode::ERR_NONE;
+}
+
+/**
+ * @brief Evaluate the result of a connection attempt.
+ */
+ErrorCode WiFiManager::finishConnect() {
     if (WiFi.isConnected()) {
         setState(WifiMgrState::CONNECTED);
         _reconnectCount = 0;
         
         FLM_LOG_INFO("WiFi", "connected IP %s RSSI %d", getIP().c_str(), getRSSI());
-        
-        // Step 7: Setup mDNS
         setupMDNS();
-        
         return ErrorCode::ERR_NONE;
     }
     
-    // Step 8: Connection failed
     setState(WifiMgrState::CONNECTION_FAILED);
     _reconnectCount++;
     
     return ErrorHandler::getInstance().logError(ErrorCode::ERR_WIFI_CONNECT,
-        "SSID: " + config.ssid);
+        "SSID: " + ConfigManager::getInstance().getWiFiConfig().ssid);
 }
 
 /**
- * @brief Disconnect from current network
+ * @brief Connect to configured WiFi network. Blocking — boot-time use only,
+ * so services start with WiFi already up. Runtime reconnects go through the
+ * non-blocking path in checkConnection().
  */
-void WiFiManager::disconnect() {
-    FLM_LOG_INFO("WiFi", "disconnecting");
-    WiFi.disconnect();
-    setState(WifiMgrState::DISCONNECTED);
+ErrorCode WiFiManager::connect() {
+    ErrorCode result = beginConnect();
+    if (result != ErrorCode::ERR_NONE) {
+        return result;
+    }
+    
+    uint32_t timeout = ConfigManager::getInstance().getWiFiConfig().connectTimeout;
+    unsigned long startTime = millis();
+    while (!WiFi.isConnected() && (millis() - startTime) < timeout) {
+        delay(100);
+        ESP.wdtFeed();
+        yield();  // Allow background tasks
+    }
+    
+    return finishConnect();
 }
 
 // =============================================================================
@@ -218,25 +222,11 @@ ErrorCode WiFiManager::startAP() {
 }
 
 /**
- * @brief Stop Access Point mode
- */
-void WiFiManager::stopAP() {
-    FLM_LOG_INFO("WiFi", "stopping AP");
-    
-    if (_dnsServer) {
-        delete _dnsServer;
-        _dnsServer = nullptr;
-    }
-    
-    WiFi.softAPdisconnect(true);
-    WiFi.mode(WIFI_STA);
-}
-
-/**
  * @brief Setup DNS server for captive portal
  */
 void WiFiManager::setupCaptivePortal() {
     if (_dnsServer) {
+        _dnsServer->stop();
         delete _dnsServer;
     }
     
@@ -335,11 +325,23 @@ void WiFiManager::loop() {
 }
 
 /**
- * @brief Check and handle reconnection
+ * @brief Check and handle reconnection.
+ * Fully non-blocking: connection attempts started here are polled across
+ * loop() iterations so the web server, MQTT, and motor safety loop keep
+ * running while WiFi is negotiating.
  */
 void WiFiManager::checkConnection() {
-    // Skip if in AP mode or connecting
-    if (_state == WifiMgrState::AP_MODE || _state == WifiMgrState::CONNECTING) {
+    // Skip if in AP mode
+    if (_state == WifiMgrState::AP_MODE) {
+        return;
+    }
+    
+    // Poll an in-progress connection attempt
+    if (_state == WifiMgrState::CONNECTING) {
+        uint32_t timeout = ConfigManager::getInstance().getWiFiConfig().connectTimeout;
+        if (WiFi.isConnected() || (millis() - _connectStartMs) >= timeout) {
+            finishConnect();
+        }
         return;
     }
     
@@ -350,12 +352,19 @@ void WiFiManager::checkConnection() {
         ErrorHandler::getInstance().logError(ErrorCode::ERR_WIFI_DISCONNECTED);
     }
     
-    // Attempt reconnection
     if (_state == WifiMgrState::DISCONNECTED || _state == WifiMgrState::CONNECTION_FAILED) {
+        // SDK auto-reconnect may have restored the link on its own
+        if (WiFi.isConnected()) {
+            FLM_LOG_INFO("WiFi", "link restored by auto-reconnect");
+            finishConnect();
+            return;
+        }
+        
+        // Attempt reconnection (non-blocking)
         if (millis() - _lastConnectAttempt > _reconnectInterval) {
             if (_reconnectCount < MAX_RECONNECT_ATTEMPTS) {
                 FLM_LOG_INFO("WiFi", "reconnecting...");
-                connect();
+                beginConnect();
             } else {
                 // Max reconnection attempts reached, switch to AP mode
                 FLM_LOG_WARN("WiFi", "max retries — AP mode");

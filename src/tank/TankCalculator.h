@@ -22,6 +22,8 @@
 #include "../sensor/ISensor.h"
 #include "../utils/ErrorHandler.h"
 
+class DHT11Ambient;
+
 // =============================================================================
 // SECTION 1: WATER LEVEL STRUCTURE
 // =============================================================================
@@ -46,7 +48,10 @@ struct WaterLevel {
     // Sensor data
     float distanceMm;           ///< Raw sensor distance reading in mm
     float distanceCm;           ///< Raw sensor distance in cm
-    float temperatureC;         ///< Temperature reading
+    float temperatureC;         ///< Temperature reading (DHT11 ambient or sensor)
+    float humidityPct;          ///< Relative humidity % (DHT11 when enabled)
+    bool temperatureValid;      ///< true when temperature source last read OK
+    bool humidityValid;         ///< true when humidity last read OK
     
     // Status
     bool valid;                 ///< Calculation validity flag
@@ -58,7 +63,8 @@ struct WaterLevel {
         : percentFilled(0), percentRemaining(100)
         , waterHeightMm(0), waterHeightCm(0)
         , volumeLiters(0), volumeRemaining(0)
-        , distanceMm(0), distanceCm(0), temperatureC(0)
+        , distanceMm(0), distanceCm(0), temperatureC(0), humidityPct(0)
+        , temperatureValid(false), humidityValid(false)
         , valid(false), sensorOk(false), timestamp(0)
         , error(ErrorCode::ERR_NONE) {}
 };
@@ -104,7 +110,7 @@ public:
      * @brief Constructor with sensor reference
      * @param sensor Reference to ISensor implementation
      */
-    explicit TankCalculator(ISensor& sensor);
+    explicit TankCalculator(ISensor& sensor, DHT11Ambient* ambient = nullptr);
     
     /**
      * @brief Initialize calculator
@@ -124,13 +130,6 @@ public:
      * @return WaterLevel structure with calculated values
      */
     WaterLevel calculateFromDistance(float distanceMm);
-    
-    /**
-     * @brief Calculate water level from distance in cm
-     * @param distanceCm Distance reading in cm
-     * @return WaterLevel structure with calculated values
-     */
-    WaterLevel calculateFromDistanceCm(float distanceCm);
     
     /**
      * @brief Get last calculated water level
@@ -166,13 +165,6 @@ public:
     float calculateVolume(float waterHeightMm) const;
     
     /**
-     * @brief Calculate water height from percentage
-     * @param percentage Water level percentage
-     * @return Water height in mm
-     */
-    float percentageToHeight(float percentage) const;
-    
-    /**
      * @brief Get water level as JSON
      * @return JSON string with water level data
      */
@@ -192,12 +184,6 @@ public:
     ErrorCode validateTankConfig() const;
     
     /**
-     * @brief Get effective tank height (accounting for sensor offset)
-     * @return Effective height in mm
-     */
-    float getEffectiveTankHeight() const;
-    
-    /**
      * @brief Get reference to the sensor
      * @return Reference to ISensor
      */
@@ -212,6 +198,7 @@ private:
     float clampPercentage(float percentage);
     
     ISensor& _sensor;           ///< Reference to sensor (ISensor interface)
+    DHT11Ambient* _ambient;     ///< Optional DHT11 (nullptr if disabled)
     WaterLevel _lastLevel;      ///< Last calculated level
     bool _initialized;          ///< Initialization flag
 };

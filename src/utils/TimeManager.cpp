@@ -32,6 +32,7 @@ TimeManager& TimeManager::getInstance() {
 TimeManager::TimeManager()
     : _initialized(false)
     , _synchronized(false)
+    , _syncPending(false)
     , _lastSyncAttempt(0)
     , _lastSyncSuccess(0)
     , _timezoneOffset(0) {
@@ -82,35 +83,15 @@ void TimeManager::configureNTP() {
 // =============================================================================
 
 /**
- * @brief Force NTP synchronization
- * @return ErrorCode indicating success or failure
+ * @brief Request NTP synchronization (non-blocking).
+ * SNTP fetches time in the background; loop() observes the result so the
+ * main loop is never stalled waiting for a UDP response.
  */
 ErrorCode TimeManager::syncTime() {
-    Serial.println(F("[TimeManager] Synchronizing time..."));
+    Serial.println(F("[TimeManager] Time sync requested"));
     _lastSyncAttempt = millis();
-    
-    // Step 1: Wait for time to be set
-    unsigned long startTime = millis();
-    time_t now = time(nullptr);
-    
-    while (now < 1000000000 && (millis() - startTime) < NTP_SYNC_TIMEOUT) {
-        delay(100);
-        now = time(nullptr);
-        yield();
-    }
-    
-    // Step 2: Check if sync was successful
-    if (now > 1000000000) {
-        _synchronized = true;
-        _lastSyncSuccess = millis();
-        Serial.printf("[TimeManager] Time synchronized: %s\n", getISO8601().c_str());
-        return ErrorCode::ERR_NONE;
-    }
-    
-    // Step 3: Sync failed
-    _synchronized = false;
-    Serial.println(F("[TimeManager] Time sync failed"));
-    return ErrorHandler::getInstance().logError(ErrorCode::ERR_TIME_SYNC);
+    _syncPending = true;
+    return ErrorCode::ERR_NONE;
 }
 
 // =============================================================================
@@ -121,15 +102,31 @@ ErrorCode TimeManager::syncTime() {
  * @brief Process time tasks (call in loop)
  */
 void TimeManager::loop() {
-    // Step 1: Check if periodic re-sync is needed
-    if (_initialized && (millis() - _lastSyncAttempt) > NTP_SYNC_INTERVAL) {
-        // Background sync - NTP library handles this automatically
-        // Just update our tracking
+    if (!_initialized) return;
+    
+    // Step 1: Observe a pending sync request (non-blocking)
+    if (_syncPending) {
         time_t now = time(nullptr);
         if (now > 1000000000) {
-            _synchronized = true;
+            _syncPending = false;
+            _lastSyncSuccess = millis();
+            if (!_synchronized) {
+                _synchronized = true;
+                Serial.printf("[TimeManager] Time synchronized: %s\n", getISO8601().c_str());
+            }
+        } else if ((millis() - _lastSyncAttempt) > NTP_SYNC_TIMEOUT) {
+            _syncPending = false;
+            if (!_synchronized) {
+                Serial.println(F("[TimeManager] Time sync failed"));
+                ErrorHandler::getInstance().logError(ErrorCode::ERR_TIME_SYNC);
+            }
         }
+    }
+    
+    // Step 2: Periodic re-sync tracking (SNTP refreshes in background)
+    if ((millis() - _lastSyncAttempt) > NTP_SYNC_INTERVAL) {
         _lastSyncAttempt = millis();
+        _syncPending = true;
     }
 }
 

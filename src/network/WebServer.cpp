@@ -55,6 +55,8 @@ void WebServerManager::setupRoutes() {
     _server.on("/api/wifi/scan", HTTP_GET, std::bind(&WebServerManager::handleApiWiFiScan, this));
 
     _server.on("/api/mqtt/status", HTTP_GET, std::bind(&WebServerManager::handleApiMQTTStatus, this));
+    _server.on("/api/mqtt/ca", HTTP_POST, std::bind(&WebServerManager::handleApiMQTTCaPost, this));
+    _server.on("/api/mqtt/ca", HTTP_DELETE, std::bind(&WebServerManager::handleApiMQTTCaDelete, this));
 
     _server.on("/api/time", HTTP_GET, std::bind(&WebServerManager::handleApiTimeStatus, this));
 
@@ -131,21 +133,22 @@ bool WebServerManager::handleFileRead(String path) {
     }
     String contentType = getContentType(path);
     String pathWithGz = path + ".gz";
-    if (LittleFS.exists(pathWithGz) || LittleFS.exists(path)) {
-        if (LittleFS.exists(pathWithGz)) {
-            path = pathWithGz;
-        }
-        File file = LittleFS.open(path, "r");
-        if (file) {
-            if (path.endsWith(".gz")) {
-                _server.sendHeader("Content-Encoding", "gzip");
-            }
-            _server.streamFile(file, contentType);
-            file.close();
-            return true;
-        }
+    bool gzipped = LittleFS.exists(pathWithGz);
+    if (gzipped) {
+        path = pathWithGz;
+    } else if (!LittleFS.exists(path)) {
+        return false;
     }
-    return false;
+    File file = LittleFS.open(path, "r");
+    if (!file) {
+        return false;
+    }
+    if (gzipped) {
+        _server.sendHeader("Content-Encoding", "gzip");
+    }
+    _server.streamFile(file, contentType);
+    file.close();
+    return true;
 }
 
 String WebServerManager::getContentType(const String& filename) {

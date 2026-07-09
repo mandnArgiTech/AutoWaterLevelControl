@@ -4,6 +4,7 @@
  * 
  * Supports multiple sensor types:
  * - US-100: Ultrasonic (UART serial)
+ * - A02YYUW: DYP-A02YYUW Ultrasonic (UART auto-frame)
  * - HC-SR04: Ultrasonic (trigger/echo)
  * - TF-Luna: LiDAR (UART serial)
  * - XKC-KD200: Infrared point-level (digital)
@@ -20,6 +21,7 @@
 #include "HCSR04Sensor.h"
 #include "TFLunaSensor.h"
 #include "XKCKD200Sensor.h"
+#include "A02YYUWSensor.h"
 #include "../config/ConfigManager.h"
 
 // Note: SensorType enum is defined in ISensor.h
@@ -46,42 +48,11 @@ public:
     static ISensor* createSensor(const SensorHWConfig& config);
     
     /**
-     * @brief Create sensor by type string with default pins
-     * @param typeStr Sensor type string
-     * @return Pointer to ISensor (caller owns memory)
-     */
-    static ISensor* createSensorByType(const String& typeStr);
-    
-    /**
-     * @brief Create sensor from string type name (legacy API)
-     * @param typeStr Sensor type string
-     * @param pin1 Primary pin (RX/TRIG/SIGNAL)
-     * @param pin2 Secondary pin (TX/ECHO)
-     * @param tankHeight Tank height for point sensors (mm)
-     * @return Pointer to ISensor (caller owns memory)
-     */
-    static ISensor* createSensorFromString(const String& typeStr, int pin1, int pin2, 
-                                           float tankHeight = 1704.5f);
-    
-    /**
      * @brief Normalize sensor type string
      * @param typeStr Type string
      * @return Normalized uppercase string
      */
     static String normalizeType(const String& typeStr);
-    
-    /**
-     * @brief Get list of supported sensor types
-     * @return JSON array string of supported types
-     */
-    static String getSupportedTypes();
-    
-    /**
-     * @brief Check if a sensor type is valid
-     * @param typeStr Type string
-     * @return true if valid
-     */
-    static bool isValidType(const String& typeStr);
     
     /**
      * @brief Get default pin configuration for sensor type

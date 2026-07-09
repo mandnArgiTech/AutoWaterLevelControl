@@ -4,11 +4,14 @@
  */
 #include "SmsMotorController.h"
 #include "../utils/ErrorHandler.h"
+#include "../config/ConfigManager.h"
 
 #define SMS_WAIT_PROMPT_MS   8000u
 #define SMS_WAIT_CMGS_MS     20000u
 #define SMS_RETRY_WAIT_MS    5000u
 #define SMS_MAX_ATTEMPTS     3u
+#define GSM_AT_TIMEOUT_MS    4000u
+#define GSM_CMGF_TIMEOUT_MS  3000u
 
 SmsMotorController::~SmsMotorController() {
     delete _gsm;
@@ -18,44 +21,52 @@ bool SmsMotorController::bufferHas(const String& buf, const char* needle) const 
     return buf.indexOf(needle) >= 0;
 }
 
-bool SmsMotorController::initGsmBlocking() {
-    if (!_gsm) return false;
-    flushGsm();
-    _gsm->println(F("AT"));
-    unsigned long t0 = millis();
-    String acc;
-    while (millis() - t0 < 4000) {
-        ESP.wdtFeed();
-        while (_gsm->available()) {
-            char c = (char)_gsm->read();
-            acc += c;
-            if (acc.indexOf("OK") >= 0) goto ok1;
-            if (acc.length() > 120) acc = acc.substring(60);
-        }
-        yield();
-        delay(15);
+/**
+ * Non-blocking GSM init FSM: AT → OK → AT+CMGF=1 → OK.
+ * Runs one small step per loop() so the main loop never stalls, even
+ * when the modem is absent or unresponsive.
+ */
+void SmsMotorController::pollGsmInit() {
+    if (_gsmOk || !_gsm) return;
+
+    if (_gsmInitPhase == GsmInitPhase::Idle) {
+        if ((long)(millis() - _nextGsmInitMs) < 0) return;
+        flushGsm();
+        _gsmInitRx = "";
+        _gsm->println(F("AT"));
+        _gsmInitPhase = GsmInitPhase::WaitAtOk;
+        _gsmInitDeadline = millis() + GSM_AT_TIMEOUT_MS;
+        return;
     }
-    return false;
-ok1:
-    flushGsm();
-    _gsm->println(F("AT+CMGF=1"));
-    t0 = millis();
-    acc = "";
-    while (millis() - t0 < 3000) {
-        ESP.wdtFeed();
-        while (_gsm->available()) {
-            char c = (char)_gsm->read();
-            acc += c;
-            if (acc.indexOf("OK") >= 0) {
-                FLM_LOG_INFO("SmsMotor", "GSM ready");
-                return true;
-            }
-            if (acc.length() > 120) acc = acc.substring(60);
-        }
-        yield();
-        delay(15);
+
+    while (_gsm->available()) {
+        _gsmInitRx += (char)_gsm->read();
+        if (_gsmInitRx.length() > 120) _gsmInitRx.remove(0, 60);
     }
-    return false;
+
+    if (bufferHas(_gsmInitRx, "OK")) {
+        if (_gsmInitPhase == GsmInitPhase::WaitAtOk) {
+            flushGsm();
+            _gsmInitRx = "";
+            _gsm->println(F("AT+CMGF=1"));
+            _gsmInitPhase = GsmInitPhase::WaitCmgfOk;
+            _gsmInitDeadline = millis() + GSM_CMGF_TIMEOUT_MS;
+        } else {
+            _gsmInitPhase = GsmInitPhase::Idle;
+            _gsmInitRx = "";
+            _gsmOk = true;
+            FLM_LOG_INFO("SmsMotor", "GSM ready");
+        }
+        return;
+    }
+
+    if ((long)(millis() - _gsmInitDeadline) >= 0) {
+        _gsmInitPhase = GsmInitPhase::Idle;
+        _gsmInitRx = "";
+        _nextGsmInitMs = millis() + GSM_INIT_RETRY_MS;
+        FLM_LOG_WARN("SmsMotor", "GSM init failed — retry in %us",
+                     (unsigned)(GSM_INIT_RETRY_MS / 1000));
+    }
 }
 
 ErrorCode SmsMotorController::begin(const MotorConfig& config) {
@@ -75,10 +86,22 @@ ErrorCode SmsMotorController::begin(const MotorConfig& config) {
             "SMS motor: configure targetPhone, onMessage, offMessage");
     }
 
+    // Detect GSM UART pins colliding with the level sensor's UART pins —
+    // two SoftwareSerial instances on the same pins silently corrupt both.
+    const SensorHWConfig& hw = ConfigManager::getInstance().getSensorConfig().hardware;
+    if (_config.gsmRxPin == hw.rxPin || _config.gsmRxPin == hw.txPin
+        || _config.gsmTxPin == hw.rxPin || _config.gsmTxPin == hw.txPin) {
+        FLM_LOG_WARN("SmsMotor", "GSM pins (%d/%d) overlap sensor UART pins (%d/%d)",
+                     _config.gsmRxPin, _config.gsmTxPin, hw.rxPin, hw.txPin);
+        ErrorHandler::getInstance().logError(ErrorCode::ERR_CONFIG_VALIDATE,
+            "GSM and sensor UART pins overlap");
+    }
+
     _gsm = new SoftwareSerial(_config.gsmRxPin, _config.gsmTxPin);
     _gsm->begin(_config.gsmBaudRate > 0 ? _config.gsmBaudRate : 9600);
     _gsmOk = false;
     _nextGsmInitMs = millis() + 800;
+    _gsmInitPhase = GsmInitPhase::Idle;
 
     _mode  = MotorMode::AUTO;
     _state = MotorState::STOPPED;
@@ -87,16 +110,6 @@ ErrorCode SmsMotorController::begin(const MotorConfig& config) {
     _smsJob = SmsJob::None;
     FLM_LOG_INFO("SmsMotor", "ready phone=%s", _config.targetPhone.c_str());
     return ErrorCode::ERR_NONE;
-}
-
-void SmsMotorController::tryGsmInit() {
-    if (_gsmOk || !_gsm || millis() < _nextGsmInitMs) return;
-    if (initGsmBlocking()) {
-        _gsmOk = true;
-    } else {
-        FLM_LOG_WARN("SmsMotor", "GSM init failed — retry in %us", (unsigned)(GSM_INIT_RETRY_MS / 1000));
-        _nextGsmInitMs = millis() + GSM_INIT_RETRY_MS;
-    }
 }
 
 void SmsMotorController::flushGsm() {
@@ -258,7 +271,7 @@ void SmsMotorController::commandOff() {
 void SmsMotorController::loop(float percentFilled) {
     if (!_initialized || _state == MotorState::DISABLED) return;
 
-    tryGsmInit();
+    pollGsmInit();
     pollSmsFsm();
 
     _lastPct = percentFilled;

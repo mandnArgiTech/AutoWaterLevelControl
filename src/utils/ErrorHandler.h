@@ -186,12 +186,6 @@ public:
     ErrorCode getLastError() const;
     
     /**
-     * @brief Get last error entry with full details
-     * @return Pointer to last error entry or nullptr
-     */
-    const ErrorEntry* getLastErrorEntry() const;
-    
-    /**
      * @brief Clear all errors
      */
     void clearErrors();
@@ -249,13 +243,6 @@ public:
     String getErrorHistoryJson() const;
     
     /**
-     * @brief Get specific error info as JSON
-     * @param code Error code
-     * @return JSON string of error info
-     */
-    String getErrorInfoJson(ErrorCode code) const;
-    
-    /**
      * @brief Print error to Serial
      * @param code Error code
      * @param additionalInfo Optional additional info
@@ -263,6 +250,10 @@ public:
     void printError(ErrorCode code, const String& additionalInfo = "") const;
 
 private:
+    // Print with pre-resolved name/description/severity (no extra lookup)
+    void printResolvedError(const String& name, const String& description,
+                            ErrorSeverity severity, const String& additionalInfo) const;
+
     // Private constructor for singleton
     ErrorHandler();
     

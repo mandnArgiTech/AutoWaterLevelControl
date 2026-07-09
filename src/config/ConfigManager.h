@@ -57,6 +57,9 @@
 #define DEFAULT_MQTT_DEVICE_NAME    "tank1"
 #define DEFAULT_MQTT_TOPIC_PREFIX   "water"
 #define DEFAULT_MQTT_PUBLISH_INTERVAL 60000  // 60 seconds
+#define DEFAULT_MQTT_TLS            false
+#define DEFAULT_MQTT_TLS_MODE       "insecure"  // insecure | fingerprint | ca
+#define DEFAULT_MQTT_FINGERPRINT    ""
 
 // Tank defaults (Sintex tank dimensions in mm)
 #define DEFAULT_TANK_TYPE           "circular"
@@ -65,10 +68,10 @@
 #define DEFAULT_TANK_VOLUME_LITERS  2438.0f  // Calculated: π * (675)² * 1704.5 / 1000000
 
 // Sensor defaults
-#define DEFAULT_SENSOR_TYPE         "US100"  // Default sensor type
+#define DEFAULT_SENSOR_TYPE         "A02YYUW"  // DYP-A02YYUW default level sensor
 #define DEFAULT_SENSOR_OFFSET       50.0f    // Distance from sensor to full tank (mm)
-#define DEFAULT_SENSOR_MIN_DISTANCE 20.0f    // Minimum range (mm)
-#define DEFAULT_SENSOR_MAX_DISTANCE 4500.0f  // Maximum range (mm)
+#define DEFAULT_SENSOR_MIN_DISTANCE 280.0f   // A02YYUW blind zone (mm)
+#define DEFAULT_SENSOR_MAX_DISTANCE 7500.0f  // A02YYUW max range (mm)
 #define DEFAULT_SENSOR_SAMPLES      5        // Number of samples for averaging
 #define DEFAULT_SENSOR_INTERVAL     2000     // ms between readings
 
@@ -90,6 +93,12 @@
 #define DEFAULT_KALMAN_ENABLED      true     // Enable Kalman filter by default
 #define DEFAULT_KALMAN_PROCESS_Q    0.01f    // Process noise (lower = smoother)
 #define DEFAULT_KALMAN_MEASURE_R    0.1f     // Measurement noise (higher = more filtering)
+
+// Ambient (on-board DHT11 temperature + humidity)
+#define DEFAULT_AMBIENT_ENABLED     true
+#define DEFAULT_AMBIENT_TYPE        "DHT11"
+#define DEFAULT_DHT11_PIN           2        ///< D4 / GPIO2
+#define DEFAULT_DHT11_READ_INTERVAL 3000u    ///< ms between DHT11 reads
 
 // System defaults
 #define DEFAULT_DEVICE_NAME         "Water Tank Monitor"
@@ -135,13 +144,16 @@ struct WiFiConfig {
 struct MQTTConfig {
     bool enabled;               ///< MQTT enabled flag
     String server;              ///< Broker hostname/IP
-    uint16_t port;              ///< Broker port
+    uint16_t port;              ///< Broker port (8883 typical for TLS)
     String username;            ///< Authentication username
     String password;            ///< Authentication password
     String clientId;            ///< Client identifier
     String deviceName;          ///< Short device name for topic (e.g. "kitchen_tank")
     String topicPrefix;         ///< Base topic prefix
     uint32_t publishInterval;   ///< Interval between publishes (ms)
+    bool tls;                   ///< Use TLS (BearSSL WiFiClientSecure)
+    String tlsMode;             ///< "insecure" (encrypt only), "fingerprint", or "ca"
+    String fingerprint;         ///< SHA-1 cert fingerprint (tlsMode=fingerprint)
 };
 
 /**
@@ -162,7 +174,7 @@ struct TankConfig {
  * @brief Sensor hardware/pin configuration
  */
 struct SensorHWConfig {
-    String type;                ///< Sensor type: US100, HC_SR04, TF_LUNA, XKC_KD200
+    String type;                ///< Sensor type: US100, A02YYUW, HC_SR04, TF_LUNA, XKC_KD200
     int rxPin;                  ///< RX pin (for UART sensors: US100, TF-Luna)
     int txPin;                  ///< TX pin (for UART sensors: US100, TF-Luna)
     int trigPin;                ///< Trigger pin (for HC-SR04)
@@ -171,6 +183,17 @@ struct SensorHWConfig {
     float mountHeightMm;        ///< Mount height for point sensors (XKC-KD200)
     float tankHeightMm;         ///< Tank height for point sensors
     bool invertedLogic;         ///< Inverted logic for XKC-KD200
+};
+
+/**
+ * @struct AmbientConfig
+ * @brief On-board ambient temperature/humidity (DHT11)
+ */
+struct AmbientConfig {
+    bool enabled;
+    String type;
+    int pin;
+    uint32_t readIntervalMs;
 };
 
 /**
@@ -197,6 +220,8 @@ struct SensorConfig {
     bool kalmanEnabled;         ///< Enable Kalman filter (optimal estimation)
     float kalmanProcessNoise;   ///< Q - Process noise (lower = smoother)
     float kalmanMeasureNoise;   ///< R - Measurement noise (higher = more filtering)
+
+    AmbientConfig ambient;      ///< DHT11 (or future ambient sensors)
 };
 
 /**

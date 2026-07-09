@@ -8,6 +8,7 @@
 #include "MQTTManager.h"
 #include "../utils/TimeManager.h"
 #include "../version.h"
+#include <LittleFS.h>
 
 void WebServerManager::handleApiStatus() {
     _requestCount++;
@@ -22,20 +23,26 @@ void WebServerManager::handleApiStatus() {
     doc["maxFreeBlock"] = ESP.getMaxFreeBlockSize();
     doc["timestamp"] = TimeManager::getInstance().getISO8601();
 
-    doc["sensorOk"] = _calculator.getLastLevel().sensorOk;
+    const WaterLevel& level = _calculator.getLastLevel();
+    doc["sensorOk"] = level.sensorOk;
     doc["sensorType"] = _sensor.getSensorTypeName();
 
-    WaterLevel level = _calculator.getLastLevel();
     JsonObject levelObj = doc["level"].to<JsonObject>();
     levelObj["valid"] = level.valid;
     levelObj["sensorOk"] = level.sensorOk;
-    if (level.sensorOk) {
+    if (level.sensorOk && level.valid) {
         levelObj["percentFilled"] = level.percentFilled;
         levelObj["percentRemaining"] = level.percentRemaining;
         levelObj["waterHeightCm"] = level.waterHeightCm;
         levelObj["volumeLiters"] = level.volumeLiters;
         levelObj["volumeRemaining"] = level.volumeRemaining;
         levelObj["state"] = TankCalculator::tankStateToString(_calculator.getTankState());
+        if (level.temperatureValid) {
+            levelObj["temperatureC"] = level.temperatureC;
+        }
+        if (level.humidityValid) {
+            levelObj["humidityPct"] = level.humidityPct;
+        }
     } else {
         levelObj["state"] = "sensor_error";
         levelObj["errorCode"] = static_cast<uint16_t>(level.error);
@@ -199,6 +206,47 @@ void WebServerManager::handleApiMQTTStatus() {
     _requestCount++;
     addCorsHeaders();
     sendJson(200, MQTTManager::getInstance().getStatusJson());
+}
+
+/**
+ * POST /api/mqtt/ca — install broker CA certificate (PEM in request body).
+ * DELETE /api/mqtt/ca — remove it.
+ * Restart required for the change to take effect.
+ */
+void WebServerManager::handleApiMQTTCaPost() {
+    _requestCount++;
+    addCorsHeaders();
+
+    if (!_server.hasArg("plain")) {
+        sendApiFailure(400, "NO_BODY", "PEM certificate body required");
+        return;
+    }
+    String pem = _server.arg("plain");
+    if (pem.indexOf("-----BEGIN CERTIFICATE-----") < 0) {
+        sendApiFailure(400, "BAD_PEM", "Body is not a PEM certificate");
+        return;
+    }
+
+    File f = LittleFS.open(MQTT_CA_FILE, "w");
+    if (!f) {
+        sendApiFailure(500, "FS_WRITE", "Cannot open CA file for writing");
+        return;
+    }
+    size_t written = f.print(pem);
+    f.close();
+    if (written != pem.length()) {
+        LittleFS.remove(MQTT_CA_FILE);
+        sendApiFailure(507, "FS_FULL", "Filesystem full while writing CA");
+        return;
+    }
+    sendSuccess("CA certificate saved; restart to apply");
+}
+
+void WebServerManager::handleApiMQTTCaDelete() {
+    _requestCount++;
+    addCorsHeaders();
+    LittleFS.remove(MQTT_CA_FILE);
+    sendSuccess("CA certificate removed; restart to apply");
 }
 
 void WebServerManager::handleApiTimeStatus() {
