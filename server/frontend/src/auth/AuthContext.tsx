@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { api, setAccessToken } from '../api/client';
 import type { LoginResponse } from '../api/types';
 
 interface AuthState {
@@ -12,7 +13,7 @@ const AuthContext = createContext<AuthState | null>(null);
 
 function persistUser(u: LoginResponse) {
   if (u.token) {
-    localStorage.setItem('flm_token', u.token);
+    setAccessToken(u.token);
   }
   localStorage.setItem('flm_user', JSON.stringify(u));
 }
@@ -20,6 +21,8 @@ function persistUser(u: LoginResponse) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LoginResponse | null>(() => {
     const raw = localStorage.getItem('flm_user');
+    const token = localStorage.getItem('flm_token');
+    if (token) setAccessToken(token);
     return raw ? JSON.parse(raw) : null;
   });
 
@@ -36,7 +39,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(merged);
       },
       logout: () => {
-        localStorage.removeItem('flm_token');
+        api.logout().catch(() => {});
+        setAccessToken(null);
         localStorage.removeItem('flm_user');
         setUser(null);
       },

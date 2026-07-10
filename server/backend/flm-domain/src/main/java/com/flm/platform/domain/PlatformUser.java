@@ -3,6 +3,8 @@ package com.flm.platform.domain;
 import com.flm.platform.common.UserRole;
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
@@ -30,6 +32,14 @@ public class PlatformUser {
     @Column(nullable = false, length = 32)
     private UserRole role;
 
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "user_role",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "role_id")
+    )
+    private Set<Role> roles = new HashSet<>();
+
     @Column(nullable = false)
     private boolean active = true;
 
@@ -40,6 +50,17 @@ public class PlatformUser {
 
     @Column(nullable = false)
     private boolean mustChangePassword = false;
+
+    @Column(nullable = false)
+    private boolean mfaEnabled = false;
+
+    @Column(length = 64)
+    private String otpSecret;
+
+    @Column(nullable = false)
+    private int failedAttempts = 0;
+
+    private Instant lockedUntil;
 
     public UUID getId() { return id; }
     public Vendor getVendor() { return vendor; }
@@ -59,4 +80,14 @@ public class PlatformUser {
     public void setLastLoginAt(Instant lastLoginAt) { this.lastLoginAt = lastLoginAt; }
     public boolean isMustChangePassword() { return mustChangePassword; }
     public void setMustChangePassword(boolean mustChangePassword) { this.mustChangePassword = mustChangePassword; }
+    public Set<Role> getRoles() { return roles; }
+    public void setRoles(Set<Role> roles) { this.roles = roles; }
+    public boolean isMfaEnabled() { return mfaEnabled; }
+    public void setMfaEnabled(boolean mfaEnabled) { this.mfaEnabled = mfaEnabled; }
+    public String getOtpSecret() { return otpSecret; }
+    public void setOtpSecret(String otpSecret) { this.otpSecret = otpSecret; }
+    public int getFailedAttempts() { return failedAttempts; }
+    public void setFailedAttempts(int failedAttempts) { this.failedAttempts = failedAttempts; }
+    public Instant getLockedUntil() { return lockedUntil; }
+    public void setLockedUntil(Instant lockedUntil) { this.lockedUntil = lockedUntil; }
 }

@@ -8,5 +8,6 @@ public record UserSummary(
     String email,
     String displayName,
     UserRole role,
-    boolean active
+    boolean active,
+    boolean mustChangePassword
 ) {}

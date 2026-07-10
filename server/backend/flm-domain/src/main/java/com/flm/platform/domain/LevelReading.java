@@ -23,6 +23,7 @@ public class LevelReading {
 
     private Double percentFilled;
     private Double volumeLiters;
+    @Column(name = "temperature_c")
     private Double temperatureC;
 
     @Column(nullable = false)

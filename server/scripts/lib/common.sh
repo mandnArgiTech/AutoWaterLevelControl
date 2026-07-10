@@ -132,20 +132,122 @@ is_service_running() {
   [[ -n "$cid" ]] && docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null | grep -q true
 }
 
+is_mqtt_standalone_running() {
+  local pidfile="$RUN_DIR/mosquitto.pid"
+  if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    return 0
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | grep -q ':1883 '
+    return $?
+  fi
+  return 1
+}
+
 is_mqtt_running() {
+  if [[ "${FLM_DEPLOY_MODE:-standalone}" == "standalone" ]]; then
+    is_mqtt_standalone_running
+    return $?
+  fi
   is_service_running mosquitto || \
     $COMPOSE -f "$SERVER_ROOT/docker-compose.infra.yml" ps -q mosquitto 2>/dev/null | grep -q .
 }
 
+is_postgres_standalone_running() {
+  local pgdata="${PG_DATA_DIR:-$SERVER_ROOT/postgres/data}"
+  local pidfile="$pgdata/postmaster.pid"
+  if [[ -f "$pidfile" ]]; then
+    local pid
+    pid="$(head -1 "$pidfile" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 is_postgres_running() {
+  if [[ "${FLM_DEPLOY_MODE:-standalone}" == "standalone" ]]; then
+    is_postgres_standalone_running
+    return $?
+  fi
   is_service_running postgres || \
     $COMPOSE -f "$SERVER_ROOT/docker-compose.infra.yml" ps -q postgres 2>/dev/null | grep -q .
+}
+
+# Resolve Mosquitto Dynamic Security plugin path on host
+find_dynsec_plugin() {
+  local p
+  for p in \
+    /usr/lib/x86_64-linux-gnu/mosquitto_dynamic_security.so \
+    /usr/lib/aarch64-linux-gnu/mosquitto_dynamic_security.so \
+    /usr/lib/mosquitto_dynamic_security.so; do
+    if [[ -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
 }
 
 export_env_for_certs() {
   ensure_env_file
   export MQTT_SERVER_CN MQTT_SAN_DNS MQTT_SAN_IPS
   export MQTT_USER_BRIDGE MQTT_PASS_BRIDGE MQTT_USER_DEVICE MQTT_PASS_DEVICE
+  export MQTT_USER_VENDOR MQTT_PASS_VENDOR
+  export MQTT_DYNSEC_ADMIN MQTT_DYNSEC_PASS
+}
+
+# Returns 0 (yes) if FLM_AUTO_YES=1, FLM_UNINSTALL_PURGE=1, or user answers y
+flm_confirm_or_auto() {
+  local prompt="${1:-Continue?}"
+  if [[ "${FLM_AUTO_YES:-}" == "1" || "${FLM_UNINSTALL_PURGE:-}" == "1" ]]; then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    return 1
+  fi
+  local ans
+  read -r -p "  ${prompt} [y/N] " ans
+  [[ "${ans,,}" == "y" ]]
+}
+
+# True when full uninstall already decided to purge (skip nested prompts)
+flm_should_purge() {
+  [[ "${FLM_UNINSTALL_PURGE:-}" == "1" || "${FLM_AUTO_YES:-}" == "1" || "${FLM_UNINSTALL_FULL:-}" == "1" ]]
+}
+
+# apt-purge Mosquitto + PostgreSQL and remove /etc/mosquitto etc.
+flm_should_remove_packages() {
+  [[ "${FLM_UNINSTALL_FULL:-}" == "1" || "${FLM_UNINSTALL_REMOVE_PACKAGES:-}" == "1" ]]
+}
+
+# Delete the install directory (e.g. /opt/flm) after services stop
+flm_should_remove_tree() {
+  [[ "${FLM_UNINSTALL_FULL:-}" == "1" || "${FLM_UNINSTALL_REMOVE_TREE:-}" == "1" ]]
+}
+
+uninstall_verify_ports() {
+  log_step 1 1 "Checking FLM ports are free"
+  local port still=0
+  if ! command -v ss >/dev/null 2>&1; then
+    log_warn "ss not available — skip port check"
+    return 0
+  fi
+  for port in 80 8080 1883 8883 5432; do
+    if ss -tln 2>/dev/null | grep -q ":${port} "; then
+      log_warn "Port ${port} still has a listener"
+      ss -tlnp 2>/dev/null | grep ":${port} " | sed 's/^/  /' || true
+      still=1
+    else
+      log_ok "Port ${port} free"
+    fi
+  done
+  if [[ $still -eq 0 ]]; then
+    log_ok "All checked ports are free"
+  else
+    log_warn "Some ports still in use — may be system services or leftover processes"
+  fi
 }
 
 pause_enter() {

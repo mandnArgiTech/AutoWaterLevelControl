@@ -1,19 +1,19 @@
-# Standalone profile — Java API on host, infra via docker-compose.infra.yml
+# Standalone profile — Java API on host, native Mosquitto + PostgreSQL
 spring:
   config:
     activate:
       on-profile: standalone
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/flmDB
-    username: flmAdmin
-    password: flmPass
+    url: jdbc:postgresql://localhost:${POSTGRES_PORT:5432}/${POSTGRES_DB:flmDB}
+    username: ${POSTGRES_USER:flmAdmin}
+    password: ${POSTGRES_PASSWORD:flmPass}
 
 flm:
   mqtt:
     broker-url: tcp://localhost:1883
-    username: flmServerAdmin
-    password: flmPass
+    username: ${MQTT_USER_BRIDGE:flmServerAdmin}
+    password: ${MQTT_PASS_BRIDGE:flmPass}
     tls-enabled: false
     topic-filter: "+/water/#"
 

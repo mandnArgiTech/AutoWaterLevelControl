@@ -1,5 +1,6 @@
 package com.flm.platform.api;
 
+import com.flm.platform.admin.service.RbacService;
 import com.flm.platform.common.UserRole;
 import com.flm.platform.domain.PlatformUser;
 import com.flm.platform.domain.PlatformUserRepository;
@@ -23,10 +24,13 @@ public class DataSeeder {
         @Value("${flm.seed.enabled:true}") boolean enabled,
         VendorRepository vendorRepository,
         PlatformUserRepository userRepository,
-        PasswordEncoder passwordEncoder
+        PasswordEncoder passwordEncoder,
+        RbacService rbacService
     ) {
         return args -> {
             if (!enabled) return;
+
+            rbacService.seedIfEmpty();
 
             Vendor demo = vendorRepository.findByCode("demo").orElseGet(() -> {
                 Vendor v = new Vendor();
@@ -35,14 +39,15 @@ public class DataSeeder {
                 return vendorRepository.save(v);
             });
 
-            seedUser(userRepository, passwordEncoder, "admin", "Platform Admin", UserRole.SUPER_ADMIN, null);
-            seedUser(userRepository, passwordEncoder, "vendor", "Demo Vendor Admin", UserRole.VENDOR_ADMIN, demo);
+            seedUser(userRepository, passwordEncoder, rbacService, "admin", "Platform Admin", UserRole.SUPER_ADMIN, null);
+            seedUser(userRepository, passwordEncoder, rbacService, "vendor", "Demo Vendor Admin", UserRole.VENDOR_ADMIN, demo);
         };
     }
 
     private static void seedUser(
         PlatformUserRepository userRepository,
         PasswordEncoder passwordEncoder,
+        RbacService rbacService,
         String username,
         String displayName,
         UserRole role,
@@ -59,6 +64,7 @@ public class DataSeeder {
         user.setPasswordHash(passwordEncoder.encode("123456"));
         user.setMustChangePassword(true);
         userRepository.save(user);
+        rbacService.assignRolesToUser(user, java.util.Set.of(role.name()));
         log.info("Seeded {}: {} / 123456 (must change password on first login)", role, username);
     }
 }

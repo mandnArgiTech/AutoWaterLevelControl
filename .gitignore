@@ -35,6 +35,7 @@ __pycache__/
 
 # Server platform
 server/.env
+server/config/remote.env
 server/logs/
 server/.run/
 server/mosquitto/certs/*
@@ -43,6 +44,9 @@ server/mosquitto/certs/*
 server/mosquitto/passwd/passwd
 server/mosquitto/data/
 server/mosquitto/log/
+server/mosquitto/.dynsec-bootstrap/
+server/mosquitto/config/mosquitto-standalone.generated.conf
+server/postgres/
 server/mosquitto/openssl/server.cnf
 server/frontend/node_modules/
 server/frontend/dist/

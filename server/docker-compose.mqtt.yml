@@ -11,9 +11,8 @@ services:
       - "8883:8883"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/config/dynamic-security.json:/mosquitto/config/dynamic-security.json
       - ./mosquitto/certs:/mosquitto/certs:ro
-      - ./mosquitto/passwd:/mosquitto/passwd:ro
-      - ./mosquitto/acl:/mosquitto/acl:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     healthcheck:

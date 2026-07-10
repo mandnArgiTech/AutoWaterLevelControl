@@ -1,0 +1,35 @@
+# Mosquitto — FLM standalone (host-native, generated from template)
+# Generated file: mosquitto-standalone.generated.conf — do not edit by hand
+#
+# per_listener_settings must be false so the Dynamic Security plugin applies
+# to both listeners. If true, global plugin is ignored → "not authorised".
+
+per_listener_settings false
+
+listener 1883 0.0.0.0
+protocol mqtt
+allow_anonymous false
+
+listener 8883 0.0.0.0
+protocol mqtt
+cafile __CERT_DIR__/ca.crt
+certfile __CERT_DIR__/server.crt
+keyfile __CERT_DIR__/server.key
+tls_version tlsv1.2
+max_packet_size 2048
+allow_anonymous false
+
+plugin __PLUGIN_SO__
+plugin_opt_config_file __DYNSEC_JSON__
+
+persistence true
+persistence_location __DATA_DIR__/
+log_dest file __LOG_DIR__/mosquitto.log
+log_dest stdout
+log_type error
+log_type warning
+log_type notice
+log_type information
+
+max_connections 200
+max_keepalive 120

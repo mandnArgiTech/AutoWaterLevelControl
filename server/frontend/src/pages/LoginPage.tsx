@@ -8,6 +8,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState('vendor');
   const [password, setPassword] = useState('123456');
   const [vendorCode, setVendorCode] = useState('demo');
+  const [otpCode, setOtpCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +21,7 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.login(username, password, vendorCode || undefined);
+      const res = await api.login(username, password, vendorCode || undefined, otpCode || undefined);
       login(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -68,6 +69,15 @@ export default function LoginPage() {
             value={vendorCode}
             onChange={(e) => setVendorCode(e.target.value)}
             placeholder="demo (leave empty for super admin)"
+          />
+        </label>
+        <label>
+          MFA code (if enabled)
+          <input
+            value={otpCode}
+            onChange={(e) => setOtpCode(e.target.value)}
+            placeholder="6-digit code"
+            inputMode="numeric"
           />
         </label>
 

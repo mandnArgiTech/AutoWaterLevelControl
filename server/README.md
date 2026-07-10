@@ -12,7 +12,9 @@ One script does everything: install, uninstall, configure, and verify.
 4. [Connect ESP8266](#step-5--connect-esp8266-device)
 5. **[Configuration reference — every `defaults.env` setting](#configuration-reference-configdefaultsenv)** ← read this for all options
 6. [Uninstall & logs](#uninstall)
-7. [Troubleshooting](#troubleshooting)
+7. **[New VPS — one-command install](#new-vps--one-command-install-from-your-pc)** ← fresh server
+8. **[Update remote after bug fixes](#update-software-on-remote-after-bug-fixes)** ← day-to-day deploys
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -40,7 +42,7 @@ The installer can install most dependencies for you on **Debian/Ubuntu** (with `
 
 | Component | Standalone (default) | Docker-only stack |
 |-----------|----------------------|-------------------|
-| **Docker** | Yes — MQTT + PostgreSQL | Yes — everything |
+| **Docker** | **No** | Yes — everything |
 | **OpenSSL** | Yes — MQTT certificates | Yes |
 | **Java 21 + Maven** | Yes — backend API on host | No |
 | **Node.js 18+ + npm** | Yes — build frontend | No |
@@ -82,6 +84,8 @@ Main Menu
   5) Verify MQTT TLS
   6) Regenerate MQTT certificates
   7) View logs
+  8) Install system dependencies only
+  9) Remote VPS (install to /opt/flm over SSH)
   0) Exit
 ```
 
@@ -93,8 +97,7 @@ Every action writes a clear log to `server/logs/flm-server-YYYYMMDD.log`.
 
 ### Option A — Full install Standalone (default / production on VPS)
 
-Java API and React UI run **on the host** (production JAR + nginx).  
-MQTT and PostgreSQL run in **Docker** (reliable, easy TLS).
+Java API, React UI, **Mosquitto**, and **PostgreSQL** all run **natively on the host** (no Docker for standalone).
 
 1. Run `./flm-server.sh`
 2. Choose **1 → Install**
@@ -102,18 +105,18 @@ MQTT and PostgreSQL run in **Docker** (reliable, easy TLS).
 
 The script will automatically:
 
-- Install missing system packages (Java 21, Maven, Node.js, nginx, Docker, OpenSSL) on Debian/Ubuntu
-- Generate TLS certificates (ESP8266-compatible)
-- Start MQTT broker (ports 1883 and 8883)
-- Start PostgreSQL
+- Install missing system packages (Java 21, Maven, Node.js, nginx, Mosquitto, PostgreSQL, OpenSSL) on Debian/Ubuntu
+- Generate TLS certificates (ESP8266-compatible) and `dynamic-security.json` from `.env`
+- Start native Mosquitto broker (ports 1883 and 8883, Dynamic Security enabled)
+- Initialize a dedicated PostgreSQL cluster under `server/postgres/data` (or `/opt/flm/postgres/data` on VPS)
 - Build and start Java API (`java -jar`)
-- Build React app and serve it with **nginx** on port 3000
+- Build React app and serve it with **nginx** on port 3000 (port **80** after remote post-install)
 
 When finished you will see:
 
 | Service | URL |
 |---------|-----|
-| Web UI | http://localhost:3000 |
+| Web UI | http://localhost:3000 (local) or **http://your-host/** on VPS (port 80) |
 | API | http://localhost:8080/api |
 | MQTT (plain) | port 1883 |
 | MQTT (TLS) | port 8883 |
@@ -126,7 +129,24 @@ FLM_AUTO_INSTALL_DEPS=1 ./flm-server.sh install
 
 (`install` and `install-standalone` are the same — standalone is the default.)
 
-### Option B — Full install with Docker (all services in containers)
+### Option B — Remote install to VPS (from your PC)
+
+See the full guide: **[New VPS — one-command install](#new-vps--one-command-install-from-your-pc)** (recommended for a fresh server).
+
+Quick version:
+
+```bash
+cd server
+cp config/remote.env.example config/remote.env
+chmod 600 config/remote.env
+# edit remote.env — host, user, password, path /opt/flm
+sudo apt install openssh-client rsync sshpass
+./flm-server.sh remote-install
+```
+
+Then open **http://your-vps-hostname/** (port **80**, not `:3000`).
+
+### Option C — Full install with Docker (all services in containers)
 
 Use this if you prefer not to install Java/Node/nginx on the host.
 
@@ -140,10 +160,10 @@ FLM_AUTO_INSTALL_DEPS=1 ./flm-server.sh install-docker
 
 | Service | URL |
 |---------|-----|
-| Web UI | http://localhost:3000 |
+| Web UI | http://localhost:3000 (local) or **http://your-host/** on VPS (port 80) |
 | API | http://localhost:8080/api |
 
-### Option C — MQTT only (zero configuration)
+### Option D — MQTT only (zero configuration)
 
 If you only need the MQTT broker for ESP8266 testing:
 
@@ -155,7 +175,25 @@ Or:
 ./flm-server.sh mqtt-install
 ```
 
-Certificates are created automatically. No OpenSSL commands needed.
+Certificates and `dynamic-security.json` are created automatically from `.env`. No OpenSSL commands needed.
+
+**Standalone install details:**
+
+- Installs `mosquitto` + `mosquitto-clients` (Debian/Ubuntu) if missing
+- Generates `mosquitto/config/dynamic-security.json` (admin `flmDynsecAdmin`, bridge `flmServerAdmin`, device `devAdmin`)
+- Renders `mosquitto/config/mosquitto-standalone.generated.conf` with absolute paths
+- Starts Mosquitto as a background process (PID in `.run/mosquitto.pid`, log in `logs/mosquitto.log`)
+- Disables the system `mosquitto` service if it conflicts on ports 1883/8883
+
+**Troubleshooting Platform Admin MQTT:** If `/admin/mqtt` cannot connect, re-run `./flm-server.sh mqtt-install` or:
+
+```bash
+cd server
+bash scripts/generate-dynamic-security.sh
+# then restart Mosquitto via menu Configure → MQTT, or mqtt-install
+```
+
+Ensure `MQTT_DYNSEC_*` in `.env` matches `mosquitto/config/dynamic-security.json`.
 
 **Files for ESP8266:**
 
@@ -167,10 +205,177 @@ Certificates are created automatically. No OpenSSL commands needed.
 
 ---
 
-## Step 4 — Log in to the web UI
+## New VPS — one-command install (from your PC)
 
-| Role | Email | Password | Vendor code |
-|------|-------|----------|-------------|
+Use this when you have a **fresh VPS** (Ubuntu/Debian) and want everything installed at **`/opt/flm`** without logging in manually for each step.
+
+### What you need
+
+| Where | What |
+|-------|------|
+| **Your PC** | This repo, `openssh-client`, `rsync`, `sshpass` |
+| **New VPS** | Ubuntu/Debian, root SSH access, public IP or hostname |
+| **Config file** | `server/config/remote.env` (gitignored — never commit) |
+
+### Step 1 — Create `config/remote.env`
+
+```bash
+cd server
+cp config/remote.env.example config/remote.env
+chmod 600 config/remote.env
+nano config/remote.env   # or use your editor
+```
+
+Example for a **new** VPS:
+
+```bash
+FLM_REMOTE_HOST=your-server.example.com   # or IP, e.g. 31.97.235.233
+FLM_REMOTE_USER=root
+FLM_REMOTE_PASSWORD=your-ssh-password     # leave empty if using SSH keys
+FLM_REMOTE_PATH=/opt/flm
+FLM_REMOTE_PORT=22
+FLM_REMOTE_INSTALL_MODE=standalone
+```
+
+| Variable | Meaning |
+|----------|---------|
+| `FLM_REMOTE_HOST` | VPS hostname or IP |
+| `FLM_REMOTE_USER` | SSH user (usually `root`) |
+| `FLM_REMOTE_PASSWORD` | SSH password (optional if SSH key works) |
+| `FLM_REMOTE_PATH` | Install directory on VPS (**default `/opt/flm`**) |
+| `FLM_REMOTE_PORT` | SSH port (default `22`) |
+| `FLM_REMOTE_INSTALL_MODE` | `standalone` (default) or `docker` |
+
+Or use menu: `./flm-server.sh` → **9) Remote VPS** → **1) Configure**
+
+> **Security:** `config/remote.env` is in `.gitignore`. Do not commit passwords. Prefer SSH keys in production.
+
+### Step 2 — Install tools on your PC (one time)
+
+```bash
+sudo apt install openssh-client rsync sshpass
+```
+
+### Step 3 — Run one command
+
+```bash
+cd server
+./flm-server.sh remote-install
+```
+
+Wait **15–20 minutes**. The script will:
+
+| Phase | What happens |
+|-------|----------------|
+| **1. Sync** | `rsync` copies `server/` → `/opt/flm` on the VPS |
+| **2. Install** | On VPS: installs Java, Node, nginx, Mosquitto, PostgreSQL (native), builds API + UI |
+| **3. Post-install** | Automatically on VPS (no manual steps): |
+
+**Post-install (automatic):**
+
+- Web UI moved to **port 80** (standard HTTP — works through most firewalls)
+- **ufw** firewall opened: 22, 80, 443, 8080, 1883, 8883
+- **MQTT** certs + `dynamic-security.json` regenerated; native Mosquitto restarted
+- **nginx** config uses absolute paths (`/opt/flm/.run/nginx.pid`)
+- **Backend** restarted if MQTT was not ready on first start
+
+### Step 4 — Open the site
+
+| Service | URL (replace hostname) |
+|---------|------------------------|
+| **Web UI** | **http://your-server.example.com/** ← use port **80**, **not** `:3000` |
+| API | `http://your-server.example.com:8080/api` |
+| MQTT TLS (ESP8266) | `your-server.example.com:8883` |
+
+**Default web login** (change on first login):
+
+| Role | Username | Password | Vendor code |
+|------|----------|----------|-------------|
+| Super admin | `admin` | `123456` | *(empty)* |
+| Vendor | `vendor` | `123456` | `demo` |
+
+Menu shortcuts: **Main → 9) Remote VPS** or **Install → 7) Remote install**
+
+### Update software on remote (after bug fixes)
+
+Use **`remote-update`** when you fixed backend or frontend code — **much faster** than `remote-install` (no DB/MQTT reinstall, keeps `.env` and data).
+
+| You changed | Command | Time (approx.) |
+|-------------|---------|----------------|
+| **Backend + frontend** | `./flm-server.sh remote-update` | 5–8 min |
+| **Backend only** (Java API) | `./flm-server.sh remote-update-backend` | 3–5 min |
+| **Frontend only** (React UI) | `./flm-server.sh remote-update-frontend` | 2–4 min |
+| **Code sync only** (no rebuild) | `./flm-server.sh remote-sync` | ~30 sec |
+
+**What `remote-update` does:**
+
+1. `rsync` your local `server/` → `/opt/flm` on VPS (keeps remote `.env`, MQTT certs, database)
+2. SSH in and **rebuild + restart** only what you need:
+   - **Backend:** `mvn package` → restart `java -jar`
+   - **Frontend:** `npm run build` → reload **nginx**
+3. Verifies web UI still on **port 80**
+
+Menu: **9) Remote VPS** → **5) Remote update** → choose all / backend / frontend
+
+**On the VPS directly** (if you already SSH'd in):
+
+```bash
+cd /opt/flm
+./flm-server.sh update              # backend + frontend
+./flm-server.sh update-backend
+./flm-server.sh update-frontend
+```
+
+**Typical workflow after fixing bugs locally:**
+
+```bash
+cd server
+# fix code in backend/ or frontend/
+./flm-server.sh remote-update-backend   # or remote-update-frontend / remote-update
+./flm-server.sh remote-status
+# open http://vivasvan-tech.in/ and test
+```
+
+> **Do not use** `remote-install` for routine updates — that reinstalls everything (~15–20 min). Use **`remote-update`**.
+
+### Other remote commands
+
+| Command | When to use |
+|---------|-------------|
+| `./flm-server.sh remote-install` | **First time** on a new VPS |
+| `./flm-server.sh remote-update` | **After bug fixes** (backend + frontend) |
+| `./flm-server.sh remote-update-backend` | Java API changes only |
+| `./flm-server.sh remote-update-frontend` | React UI changes only |
+| `./flm-server.sh remote-sync` | Push files only — no rebuild (rare) |
+| `./flm-server.sh remote-status` | Check MQTT, DB, API, UI on VPS |
+| `./flm-server.sh remote-uninstall` | Remove FLM from VPS |
+| `./flm-server.sh remote-install-docker` | Install all-in-Docker on VPS |
+| `./flm-server.sh remote-configure` | Edit `remote.env` via menu |
+
+Menu shortcuts: **Main → 9) Remote VPS** or **Install → 7) Remote install**
+
+### If the web page still does not open
+
+1. Use **http://hostname/** not **http://hostname:3000/**
+2. Check `./flm-server.sh remote-status`
+3. On **Hostinger** (or other cloud): open ports **80**, **8080**, **8883** in the provider firewall panel (in addition to ufw on the server)
+4. See [Troubleshooting](#troubleshooting) below
+
+### Install directly on the VPS (SSH in yourself)
+
+If you are already logged into the VPS (not using `remote-install` from PC):
+
+```bash
+cd /opt/flm
+FLM_AUTO_INSTALL_DEPS=1 ./flm-server.sh install
+```
+
+Then set `FRONTEND_PORT=80` in `.env` and reinstall frontend, or use `remote-install` from PC which handles this automatically.
+
+---
+
+| Role | Username | Password | Vendor code |
+|------|----------|----------|-------------|
 | Super admin | `admin` | `123456` | *(leave empty)* |
 | Vendor admin | `vendor` | `123456` | `demo` |
 
@@ -510,6 +715,55 @@ MQTT_SAN_DNS=vivasvan-tech.in,mqtt.vivasvan-tech.in,localhost
 
 ---
 
+#### `FLM_WEB_ALLOWED_ORIGINS`
+
+| | |
+|---|---|
+| **Default** | `https://vivasvan-tech.in,http://vivasvan-tech.in,http://localhost:3000,http://localhost:5173` |
+| **What it is** | Comma-separated list of origins allowed for **CORS** (browser → API). |
+| **Used by** | Java `SecurityConfig` — required for web UI login and admin pages from your domain. |
+
+**When to change:** Add your production URL with `https://` when TLS is enabled. Include `http://` only if you still serve plain HTTP.
+
+---
+
+#### `MQTT_DYNSEC_ADMIN` / `MQTT_DYNSEC_PASS`
+
+| | |
+|---|---|
+| **Default** | `flmDynsecAdmin` / `flmDynsecPass` |
+| **What it is** | Credentials for the **MQTT Dynamic Security** control API (platform admin MQTT page). |
+| **Used by** | `MqttControlService` — must match the `flmDynsecAdmin` client in `mosquitto/config/dynamic-security.json`. |
+
+**When to change:** Update `.env`, then run `./flm-server.sh` → **Configure → MQTT** (or `bash scripts/generate-dynamic-security.sh` and restart Mosquitto). Install regenerates `dynamic-security.json` automatically.
+
+#### Credential architecture (who uses what)
+
+Web login, MQTT data ingest, MQTT broker admin, and ESP8266 devices each use **different** credentials:
+
+```
+┌─────────────────┐     JWT (FLM_JWT_SECRET)      ┌──────────────────┐
+│  Web browser    │ ────────────────────────────► │  Java API        │
+│  (admin login)  │                               │                  │
+└─────────────────┘                               │  MqttIngest      │──► flmServerAdmin ──► ingest readings
+                                                  │  MqttControl     │──► flmDynsecAdmin ──► manage broker
+                                                  └──────────────────┘
+                                                           ▲
+┌─────────────────┐                                        │
+│  ESP8266        │ ───────── devAdmin ────────────────────┘
+│  (sensor)       │         (publish level only)
+└─────────────────┘
+```
+
+| Credential | `.env` variable | MQTT user | Purpose |
+|------------|-----------------|-----------|---------|
+| Web JWT | `FLM_JWT_SECRET` | — | Sign/verify browser login tokens (`admin`, `vendor`, …) |
+| Data bridge | `MQTT_USER_BRIDGE` / `MQTT_PASS_BRIDGE` | `flmServerAdmin` | Backend subscribes to `+/water/#`, stores readings |
+| Broker admin | `MQTT_DYNSEC_ADMIN` / `MQTT_DYNSEC_PASS` | `flmDynsecAdmin` | Platform Admin → `/admin/mqtt` (Dynamic Security API) |
+| Device | `MQTT_USER_DEVICE` / `MQTT_PASS_DEVICE` | `devAdmin` | ESP8266 publishes `tank1_xxx/water/level` |
+
+---
+
 ### React UI (frontend) settings
 
 #### `FRONTEND_PORT`
@@ -581,7 +835,7 @@ MQTT_SAN_DNS=vivasvan-tech.in,mqtt.vivasvan-tech.in,localhost
 
 | Mode | Meaning |
 |------|---------|
-| `standalone` | **Default production on VPS.** Java API runs as `java -jar`; React is built and served by **host nginx**. MQTT + PostgreSQL use Docker. |
+| `standalone` | **Default production on VPS.** Java API runs as `java -jar`; React is built and served by **host nginx**. Mosquitto and PostgreSQL run **natively on the host** (no Docker). |
 | `docker` | Backend and frontend run in **Docker containers**. |
 
 **Note:** **Install ALL — Standalone** (menu 1) and **Install ALL — Docker** (menu 2) set this automatically.
@@ -613,7 +867,10 @@ MQTT_SAN_DNS=vivasvan-tech.in,mqtt.vivasvan-tech.in,localhost
 | `POSTGRES_PASSWORD` | `flmPass` | PostgreSQL + Java API |
 | `POSTGRES_PORT` | `5432` | PostgreSQL host port |
 | `API_PORT` | `8080` | Java REST API |
-| `FLM_JWT_SECRET` | *(see file)* | Web login tokens |
+| `FLM_JWT_SECRET` | *(see file, 32+ chars)* | Web login JWT signing |
+| `FLM_WEB_ALLOWED_ORIGINS` | `https://vivasvan-tech.in,...` | CORS allowlist |
+| `MQTT_DYNSEC_ADMIN` | `flmDynsecAdmin` | MQTT admin control API user |
+| `MQTT_DYNSEC_PASS` | `flmDynsecPass` | MQTT admin control API password |
 | `FRONTEND_PORT` | `3000` | Web UI (standalone nginx + Docker) |
 | `FRONTEND_DEV_PORT` | `5173` | Optional `npm run dev` only |
 | `VITE_API_BASE` | `/api` | Frontend API path |
@@ -636,21 +893,48 @@ MQTT_SAN_DNS=vivasvan-tech.in,mqtt.vivasvan-tech.in,localhost
 
 ## Uninstall
 
-Run `./flm-server.sh` → **2) Uninstall**
+Standalone / remote uninstall is a **full wipe** by default when run non-interactively:
 
-| Option | What it removes |
-|--------|-----------------|
-| Uninstall ALL | Everything |
-| MQTT only | Mosquitto container (asks about certs/volumes) |
-| Database only | PostgreSQL (asks about data) |
-| Backend / Frontend | Individual services |
+1. Stops nginx, Java API, Mosquitto, and the native PostgreSQL cluster
+2. Deletes FLM-generated data (certs, dynsec, `postgres/`, nginx conf)
+3. **apt-purges** Mosquitto + PostgreSQL (removes `/etc/mosquitto` and system PG data)
+4. **Deletes the install directory** (e.g. `/opt/flm`)
 
-**Quick uninstall:**
+Java, Maven, Node, and nginx packages are left installed (often shared).
+
+| Option | What it does |
+|--------|----------------|
+| Uninstall ALL (interactive) | Prompts for data purge, package purge, and install-dir delete |
+| Uninstall ALL (`FLM_UNINSTALL_FULL=1` / remote) | Full wipe — no keep |
+| MQTT / DB / Backend / Frontend only | Component stop + optional data purge |
+
+**Remote full wipe (from your PC):**
 
 ```bash
-./flm-server.sh uninstall
+./flm-server.sh remote-uninstall
 ```
 
+**Local full wipe on a VPS install dir (e.g. `/opt/flm`) — destroys that folder:**
+
+```bash
+FLM_UNINSTALL_FULL=1 ./flm-server.sh uninstall
+```
+
+**Local non-interactive (purge FLM data only; keep packages + source tree):**
+
+```bash
+FLM_AUTO_YES=1 ./flm-server.sh uninstall
+```
+
+**Keep install tree but remove packages + data:**
+
+```bash
+FLM_UNINSTALL_FULL=1 FLM_UNINSTALL_REMOVE_TREE=0 ./flm-server.sh uninstall
+```
+
+After a clean remote uninstall: `/opt/flm` gone, `/etc/mosquitto` gone, Mosquitto/PostgreSQL packages gone, FLM ports free. Reinstall with `./flm-server.sh remote-install`.
+
+Docker-mode uninstall still tears down compose services when `FLM_DEPLOY_MODE=docker`.
 ---
 
 ## Check status and logs
@@ -685,6 +969,64 @@ React web UI ──login/reports──┘
 ```
 
 MQTT topic from device: `tank1_abc123/water/level`
+
+---
+
+## Platform Administration (RBAC, MQTT, Database)
+
+Super admins (`admin` user, `SUPER_ADMIN` role) can manage the full platform from the web UI after login.
+
+### Admin pages
+
+| Route | Permission | Purpose |
+|-------|------------|---------|
+| `/admin/roles` | `ROLE_MANAGE` | Edit role → permission matrix |
+| `/admin/users` | `USER_MANAGE` | Platform-wide user management |
+| `/admin/vendors` | `VENDOR_MANAGE` | Create and list vendors |
+| `/admin/mqtt` | `PLATFORM_MQTT_*` | MQTT Dynamic Security — clients, device provisioning |
+| `/admin/database` | `PLATFORM_DB_*` | PostgreSQL health, backups, restore |
+| `/admin/sql` | `PLATFORM_SQL_*` | Guarded SQL workspace (read default; writes need step-up) |
+| `/admin/audit` | `AUDIT_READ` | Immutable audit log |
+
+### Security features
+
+- **Short-lived JWT** (15 min) + **httpOnly refresh cookie** (rotated on each refresh)
+- **TOTP MFA** required for `SUPER_ADMIN` (enroll via API after first login)
+- **Step-up auth** for destructive actions (password + MFA → `X-Step-Up-Token` header)
+- **Account lockout** after 5 failed logins (15 min)
+- **Rate limiting** on `/api/auth/**` and `/api/admin/platform/**`
+- **Flyway migrations** — schema is versioned (`db/migration/V1__*.sql`)
+
+### MQTT Dynamic Security
+
+Mosquitto uses the **Dynamic Security plugin**. On standalone install, `mosquitto/config/dynamic-security.json` is **generated from `.env`** (not edited by hand). The backend talks to `$CONTROL/dynamic-security/v1` — no shell scripts from the web tier.
+
+Default dynsec admin: `flmDynsecAdmin` / `flmDynsecPass` (set via `MQTT_DYNSEC_ADMIN`, `MQTT_DYNSEC_PASS` in `.env`).
+
+See [Credential architecture (who uses what)](#credential-architecture-who-uses-what) for how `FLM_JWT_SECRET`, `flmServerAdmin`, `flmDynsecAdmin`, and `devAdmin` relate.
+
+### Environment variables (production)
+
+| Variable | Purpose |
+|----------|---------|
+| `FLM_JWT_SECRET` | JWT signing key (min 32 chars) — **change in production** |
+| `FLM_WEB_ALLOWED_ORIGINS` | CORS allowlist (e.g. `https://vivasvan-tech.in`) |
+| `FLM_SERVER_ROOT` | Server install path (default `/opt/flm`) |
+| `MQTT_DYNSEC_ADMIN` / `MQTT_DYNSEC_PASS` | MQTT control API credentials |
+
+### Security runbook
+
+1. Change default `admin` / `123456` password immediately after install.
+2. Enroll MFA for super admin (`POST /api/auth/mfa/enroll` then `/mfa/confirm`).
+3. Restrict `/admin/*` in nginx to trusted IPs if exposing SQL workspace publicly.
+4. Take a backup before any SQL write or database restore.
+5. MQTT cert rotation requires re-uploading CA to ESP8266 devices — plan maintenance windows.
+
+### API base paths
+
+- Auth: `/api/auth/login`, `/api/auth/refresh`, `/api/auth/step-up`, `/api/auth/mfa/*`
+- Platform admin: `/api/admin/platform/**` (requires `SUPER_ADMIN` + fine-grained permissions)
+- Metrics: `/actuator/prometheus` (authenticated)
 
 ---
 
@@ -773,6 +1115,23 @@ FLM_AUTO_INSTALL_DEPS=1 ./flm-server.sh install-deps
 ```
 
 Or from the menu: **8) Install system dependencies only**
+
+---
+
+### nginx config test failed — `open() ".../.run/nginx.pid" failed`
+
+System nginx resolves **relative** paths in the config against `/usr/share/nginx`, not `/opt/flm`.  
+The installer now writes **absolute** paths (`/opt/flm/.run/nginx.pid`, `/opt/flm/logs/nginx-error.log`).
+
+**Fix:** sync the update and reinstall frontend on the VPS:
+
+```bash
+./flm-server.sh remote-sync
+ssh root@vivasvan-tech.in 'cd /opt/flm && ./flm-server.sh'
+# Install → 6) Frontend only
+```
+
+Or re-run: `./flm-server.sh remote-install`
 
 ---
 

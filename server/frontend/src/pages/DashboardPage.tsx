@@ -13,6 +13,7 @@ import { api } from '../api/client';
 import type { DeviceSummary } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import TankGauge from '../components/TankGauge';
+import { useIsMobile } from '../hooks/useMediaQuery';
 
 function StatCard({ label, value, hint, tone = 'blue' }: {
   label: string;
@@ -34,11 +35,13 @@ function DeviceMonitorCard({
   selected,
   onSelect,
   canCommand,
+  compact,
 }: {
   device: DeviceSummary;
   selected: boolean;
   onSelect: () => void;
   canCommand: boolean;
+  compact?: boolean;
 }) {
   const fill = device.latestPercentFilled ?? 0;
 
@@ -61,7 +64,7 @@ function DeviceMonitorCard({
       </div>
 
       <div className="monitor-gauge-row">
-        <TankGauge percent={device.latestPercentFilled} size={150} />
+        <TankGauge percent={device.latestPercentFilled} size={compact ? 120 : 150} />
         <div className="monitor-side-stats">
           <div>
             <span className="mini-label">Volume</span>
@@ -106,6 +109,7 @@ function DeviceMonitorCard({
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const [selectedId, setSelectedId] = useState<string>('');
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -144,6 +148,7 @@ export default function DashboardPage() {
       : 0;
   const selected = devices.find((d) => d.id === activeId);
   const canCommand = user?.role !== 'VIEWER';
+  const chartHeight = isMobile ? 260 : 360;
 
   return (
     <div className="page dashboard-page">
@@ -158,7 +163,7 @@ export default function DashboardPage() {
         </div>
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-primary btn-header-action"
           onClick={() => refetch()}
           disabled={isFetching}
         >
@@ -192,6 +197,7 @@ export default function DashboardPage() {
                 selected={d.id === activeId}
                 onSelect={() => setSelectedId(d.id)}
                 canCommand={canCommand}
+                compact={isMobile}
               />
             ))}
           </div>
@@ -205,7 +211,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="live-badge">LIVE</div>
               </div>
-              <ResponsiveContainer width="100%" height={360}>
+              <ResponsiveContainer width="100%" height={chartHeight}>
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="fillGradient" x1="0" y1="0" x2="0" y2="1">

@@ -32,6 +32,8 @@ public class MustChangePasswordFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         return path.startsWith("/api/auth/login")
+            || path.startsWith("/api/auth/refresh")
+            || path.startsWith("/api/auth/mfa/**")
             || path.startsWith("/api/auth/change-password")
             || path.startsWith("/actuator/");
     }

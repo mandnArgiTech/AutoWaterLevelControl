@@ -3,10 +3,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -f "$ROOT/.env" ]]; then set -a; # shellcheck disable=SC1091
+  source "$ROOT/.env"; set +a; fi
+
 CERT_DIR="$ROOT/mosquitto/certs"
 HOST="${MQTT_TLS_TEST_HOST:-31.97.235.233}"
 PORT="${MQTT_TLS_TEST_PORT:-8883}"
 CN="${MQTT_SERVER_CN:-vivasvan-tech.in}"
+MQTT_USER_DEVICE="${MQTT_USER_DEVICE:-devAdmin}"
+MQTT_PASS_DEVICE="${MQTT_PASS_DEVICE:-123456}"
 
 [[ -f "$CERT_DIR/ca.crt" ]] || { echo "Run ./scripts/generate-mqtt-certs.sh first" >&2; exit 1; }
 
@@ -26,14 +31,15 @@ echo "==> Fingerprint for tlsMode=fingerprint"
 cat "$CERT_DIR/esp8266-fingerprint.txt"
 
 echo ""
-echo "==> MQTT publish test (devAdmin user)"
+echo "==> MQTT publish test (${MQTT_USER_DEVICE} → testtank/water/level)"
 if command -v mosquitto_pub >/dev/null 2>&1; then
+  # device_dev role allows publishClientSend on +/water/level
   mosquitto_pub -h "$HOST" -p "$PORT" \
     --cafile "$CERT_DIR/ca.crt" --tls-version tlsv1.2 \
-    -u devAdmin -P 123456 \
-    -t 'test/flm/verify' -m '{"ok":true}' -q 1 \
+    -u "$MQTT_USER_DEVICE" -P "$MQTT_PASS_DEVICE" \
+    -t 'testtank/water/level' -m '{"ok":true,"level":0}' -q 1 \
     && echo "MQTT TLS publish OK" \
-    || echo "WARN: MQTT publish failed (check Mosquitto users/ACL)"
+    || echo "WARN: MQTT publish failed (check Mosquitto users/ACL / dynamic-security.json)"
 else
   echo "mosquitto_pub not installed — skip MQTT publish test"
 fi

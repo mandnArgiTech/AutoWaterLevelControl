@@ -1,8 +1,26 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { FormEvent, useState } from 'react';
 import { api } from '../api/client';
 
 export default function AdminVendorsPage() {
+  const qc = useQueryClient();
   const vendors = useQuery({ queryKey: ['vendors'], queryFn: api.vendors });
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+
+  const create = useMutation({
+    mutationFn: () => api.createVendor(code, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vendors'] });
+      setCode('');
+      setName('');
+    },
+  });
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    create.mutate();
+  }
 
   return (
     <div className="page">
@@ -13,6 +31,15 @@ export default function AdminVendorsPage() {
           <p className="page-lead">Multi-tenant organizations on the platform</p>
         </div>
       </header>
+
+      <section className="card-panel">
+        <h2 className="panel-title">Create vendor</h2>
+        <form className="form-grid" onSubmit={onSubmit}>
+          <label>Code<input value={code} onChange={(e) => setCode(e.target.value)} required /></label>
+          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} required /></label>
+          <button type="submit" className="btn-primary" disabled={create.isPending}>Create</button>
+        </form>
+      </section>
 
       <section className="card-panel">
         <h2 className="panel-title">Registered vendors</h2>

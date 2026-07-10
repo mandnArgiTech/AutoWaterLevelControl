@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useIsMobile } from '../hooks/useMediaQuery';
 
 function defaultFromDate() {
   const d = new Date();
@@ -27,6 +28,7 @@ function todayDate() {
 
 export default function ReportsPage() {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const [deviceId, setDeviceId] = useState('');
   const [fromDate, setFromDate] = useState(defaultFromDate);
   const [toDate, setToDate] = useState(todayDate);
@@ -75,6 +77,8 @@ export default function ReportsPage() {
   }, [chartData]);
 
   const selectedDevice = (devices.data ?? []).find((d) => d.id === deviceId);
+  const fillChartHeight = isMobile ? 280 : 380;
+  const volumeChartHeight = isMobile ? 240 : 320;
 
   return (
     <div className="page reports-page">
@@ -154,7 +158,7 @@ export default function ReportsPage() {
           <section className="card-panel chart-panel">
             <h2 className="panel-title">Water level over time</h2>
             <p className="panel-subtitle">{selectedDevice?.displayName} — fill percentage (%)</p>
-            <ResponsiveContainer width="100%" height={380}>
+            <ResponsiveContainer width="100%" height={fillChartHeight}>
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="reportFill" x1="0" y1="0" x2="0" y2="1">
@@ -174,7 +178,7 @@ export default function ReportsPage() {
           <section className="card-panel chart-panel">
             <h2 className="panel-title">Volume trend</h2>
             <p className="panel-subtitle">Estimated volume in liters</p>
-            <ResponsiveContainer width="100%" height={320}>
+            <ResponsiveContainer width="100%" height={volumeChartHeight}>
               <BarChart data={chartData}>
                 <CartesianGrid stroke="#e2e8f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />

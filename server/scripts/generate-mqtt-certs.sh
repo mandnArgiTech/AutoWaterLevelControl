@@ -124,7 +124,7 @@ generate_server() {
     -out "$CERT_DIR/server.crt" \
     -extensions v3_req -extfile "$OPENSSL_DIR/server.cnf"
   rm -f "$CERT_DIR/server.csr"
-  chmod 600 "$CERT_DIR/server.key"
+  # server.key chmod applied in fix_mosquitto_cert_permissions()
 }
 
 mosquitto_passwd_bin() {
@@ -158,8 +158,17 @@ generate_passwd() {
   _mp "$MQTT_USER_BRIDGE" "$MQTT_PASS_BRIDGE"
   _mp "$MQTT_USER_VENDOR" "$MQTT_PASS_VENDOR"
   _mp "$MQTT_USER_DEVICE" "$MQTT_PASS_DEVICE"
-  chmod 600 "$passwd_file"
-  chmod 700 "$PASSWD_DIR"
+  fix_mosquitto_cert_permissions
+}
+
+# Host-native Mosquitto and Docker mounts must read certs (and legacy passwd if used)
+fix_mosquitto_cert_permissions() {
+  chmod 755 "$CERT_DIR" "$PASSWD_DIR"
+  [[ -f "$PASSWD_DIR/passwd" ]] && chmod 644 "$PASSWD_DIR/passwd"
+  chmod 644 "$CERT_DIR/ca.crt" "$CERT_DIR/server.crt" "$CERT_DIR/server.key" 2>/dev/null || true
+  [[ -f "$CERT_DIR/esp8266_ca.pem" ]] && chmod 644 "$CERT_DIR/esp8266_ca.pem"
+  # CA private key stays host-only (not mounted into container)
+  [[ -f "$CERT_DIR/ca.key" ]] && chmod 600 "$CERT_DIR/ca.key"
 }
 
 # Format SHA-1 fingerprint exactly as ESP8266 WiFiClientSecure::setFingerprint() expects:
@@ -235,10 +244,16 @@ verify_tls_listener() {
     return 0
   fi
   log "Testing TLS 1.2 handshake against ${host}:${port}"
-  echo | timeout 5 openssl s_client -connect "${host}:${port}" \
+  # Non-fatal: during install the broker may still be running with previous certs.
+  # Full verification runs after Mosquitto restarts (verify-mqtt-tls.sh).
+  if echo | timeout 5 openssl s_client -connect "${host}:${port}" \
     -CAfile "$CERT_DIR/ca.crt" -tls1_2 -servername "$MQTT_SERVER_CN" 2>/dev/null \
-    | grep -q "Verify return code: 0 (ok)" \
-    || die "TLS 1.2 handshake failed — check Mosquitto is running with generated certs"
+    | grep -q "Verify return code: 0 (ok)"; then
+    log "TLS 1.2 handshake OK"
+  else
+    log "TLS handshake not OK yet (broker may still use old certs) — will re-check after Mosquitto restart"
+  fi
+  return 0
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -253,7 +268,13 @@ fi
 if [[ ! -f "$CERT_DIR/ca.crt" ]]; then generate_ca; else log "CA exists (use --force to regenerate)"; fi
 if [[ ! -f "$CERT_DIR/server.crt" ]]; then generate_server; else log "Server cert exists (use --force to regenerate)"; fi
 
-generate_passwd
+FLM_DEPLOY_MODE="${FLM_DEPLOY_MODE:-standalone}"
+if [[ "$FLM_DEPLOY_MODE" == "docker" ]]; then
+  generate_passwd
+else
+  bash "$ROOT/scripts/generate-dynamic-security.sh"
+fi
+fix_mosquitto_cert_permissions
 verify_certs
 write_esp8266_artifacts
 verify_tls_listener
@@ -286,7 +307,7 @@ If device connects by IP with tlsMode=ca, regenerate with that IP in SAN:
   MQTT_SAN_IPS=<broker-ip> MQTT_SERVER_CN=<broker-ip> $0 --force
 
 Next:
-  Standalone:  ./scripts/start-standalone.sh
+  Standalone:  ./flm-server.sh mqtt-install  (native Mosquitto + Dynamic Security)
   Docker:      ./scripts/start-docker.sh
 ================================================================================
 EOF

@@ -1,7 +1,7 @@
 {
   "wifi": {
-    "ssid": "",
-    "password": "",
+    "ssid": "dvpNetwork",
+    "password": "Magicgreen",
     "hostname": "FluidMonitor",
     "apSsid": "FluidMonitor-AP",
     "apPassword": "12345678",
@@ -10,16 +10,16 @@
   },
   "mqtt": {
     "enabled": false,
-    "server": "",
-    "port": 1883,
-    "username": "",
-    "password": "",
+    "server": "vivasvan-tech.in",
+    "port": 8883,
+    "username": "devAdmin",
+    "password": "123456",
     "clientId": "FluidMonitor",
     "deviceName": "tank1",
     "topicPrefix": "water",
     "publishInterval": 60000,
-    "tls": false,
-    "tlsMode": "insecure",
+    "tls": true,
+    "tlsMode": "ca",
     "fingerprint": ""
   },
   "tank": {

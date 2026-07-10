@@ -63,7 +63,7 @@ backend_install_standalone() {
     source "$SCRIPTS_DIR/lib/postgres.sh"
     postgres_install || return 1
   fi
-  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qi mosquitto; then
+  if ! is_mqtt_running; then
     source "$SCRIPTS_DIR/lib/mqtt.sh"
     mqtt_install || return 1
   fi
@@ -81,6 +81,14 @@ backend_install_standalone() {
     log_warn "Backend already running (PID $(cat "$pidfile")) — stopping first"
     backend_stop_standalone_process
   fi
+
+  # Export DB + MQTT so application-standalone.yml placeholders resolve
+  export POSTGRES_DB="${POSTGRES_DB:-flmDB}"
+  export POSTGRES_USER="${POSTGRES_USER:-flmAdmin}"
+  export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-flmPass}"
+  export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+  export MQTT_USER_BRIDGE="${MQTT_USER_BRIDGE:-flmServerAdmin}"
+  export MQTT_PASS_BRIDGE="${MQTT_PASS_BRIDGE:-flmPass}"
 
   nohup java -jar "$jar" \
     --spring.profiles.active=standalone \
@@ -100,34 +108,46 @@ backend_install_standalone() {
 
 backend_stop_standalone_process() {
   local pidfile="$RUN_DIR/backend.pid"
-  if [[ ! -f "$pidfile" ]]; then
-    return 0
+  if [[ -f "$pidfile" ]]; then
+    local pid
+    pid="$(cat "$pidfile")"
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      sleep 2
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pidfile"
   fi
-  local pid
-  pid="$(cat "$pidfile")"
-  if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    sleep 2
-    kill -9 "$pid" 2>/dev/null || true
-  fi
-  rm -f "$pidfile"
+  # Orphan java -jar processes from prior installs
+  pkill -f 'flm-api-.*\.jar' 2>/dev/null || true
+  sleep 1
+  pkill -9 -f 'flm-api-.*\.jar' 2>/dev/null || true
 }
 
 backend_uninstall() {
   log_header "Uninstalling Backend (Java API)"
+  ensure_env_file
 
-  log_step 1 2 "Stopping Docker backend"
-  cd "$SERVER_ROOT"
-  $COMPOSE -f docker-compose.backend.yml down 2>/dev/null || true
-  $COMPOSE -f docker-compose.yml stop backend 2>/dev/null || true
-  $COMPOSE -f docker-compose.yml rm -f backend 2>/dev/null || true
-  log_ok "Docker backend removed"
+  if [[ "${FLM_DEPLOY_MODE:-standalone}" == "docker" ]]; then
+    log_step 1 2 "Stopping Docker backend"
+    cd "$SERVER_ROOT"
+    $COMPOSE -f docker-compose.backend.yml down 2>/dev/null || true
+    $COMPOSE -f docker-compose.yml stop backend 2>/dev/null || true
+    $COMPOSE -f docker-compose.yml rm -f backend 2>/dev/null || true
+    log_ok "Docker backend removed"
+  fi
 
-  log_step 2 2 "Stopping standalone backend"
-  if backend_stop_standalone_process; then
-    log_ok "Standalone backend stopped"
+  log_step 1 2 "Stopping standalone backend"
+  backend_stop_standalone_process
+  log_ok "Standalone backend stopped"
+
+  if flm_should_purge; then
+    log_step 2 2 "Clearing backend log"
+    : > "$LOG_DIR/backend.log" 2>/dev/null || true
+    log_ok "backend.log cleared"
   else
-    log_info "No standalone backend PID file"
+    log_step 2 2 "Data"
+    log_info "JAR and logs kept"
   fi
 
   log_summary_box "Backend Uninstall Complete"

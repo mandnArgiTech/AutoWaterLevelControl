@@ -15,11 +15,13 @@ frontend_write_nginx_conf() {
     log_fail "Missing nginx template: $NGINX_TEMPLATE"
     return 1
   fi
-  mkdir -p "$SERVER_ROOT/nginx"
+  mkdir -p "$SERVER_ROOT/nginx" "$RUN_DIR" "$LOG_DIR"
   sed \
     -e "s|__FRONTEND_PORT__|${FRONTEND_PORT:-3000}|g" \
     -e "s|__API_PORT__|${API_PORT:-8080}|g" \
     -e "s|__FRONTEND_ROOT__|${SERVER_ROOT}/frontend/dist|g" \
+    -e "s|__NGINX_PID__|${RUN_DIR}/nginx.pid|g" \
+    -e "s|__NGINX_ERROR_LOG__|${LOG_DIR}/nginx-error.log|g" \
     "$NGINX_TEMPLATE" > "$NGINX_CONF"
   log_ok "Wrote $NGINX_CONF"
 }
@@ -36,6 +38,9 @@ frontend_stop_standalone_nginx() {
     fi
     rm -f "$RUN_DIR/nginx.pid"
   fi
+  pkill -f "nginx -c ${SERVER_ROOT}/nginx/flm-standalone.conf" 2>/dev/null || true
+  pkill -f "nginx -c $NGINX_CONF" 2>/dev/null || true
+  rm -f "$RUN_DIR/nginx.pid" 2>/dev/null || true
 }
 
 frontend_install_docker() {
@@ -85,6 +90,7 @@ frontend_install_standalone() {
   frontend_stop_standalone_nginx
 
   log_step 4 4 "Starting nginx"
+  mkdir -p "$RUN_DIR" "$LOG_DIR"
   if ! nginx -c "$NGINX_CONF" -t 2>&1 | tee -a "$FLM_LOG_FILE"; then
     log_fail "nginx config test failed"
     return 1
@@ -106,13 +112,17 @@ frontend_install_standalone() {
 
 frontend_uninstall() {
   log_header "Uninstalling Frontend (React UI)"
+  ensure_env_file
 
-  cd "$SERVER_ROOT"
-  $COMPOSE -f docker-compose.frontend.yml down 2>/dev/null || true
-  $COMPOSE -f docker-compose.yml stop frontend 2>/dev/null || true
-  log_ok "Docker frontend removed"
+  if [[ "${FLM_DEPLOY_MODE:-standalone}" == "docker" ]]; then
+    cd "$SERVER_ROOT"
+    $COMPOSE -f docker-compose.frontend.yml down 2>/dev/null || true
+    $COMPOSE -f docker-compose.yml stop frontend 2>/dev/null || true
+    log_ok "Docker frontend removed"
+  fi
 
   frontend_stop_standalone_nginx
+  log_ok "Standalone nginx stopped"
 
   local pidfile="$RUN_DIR/frontend.pid"
   if [[ -f "$pidfile" ]]; then
@@ -121,6 +131,13 @@ frontend_uninstall() {
     kill "$pid" 2>/dev/null || true
     rm -f "$pidfile"
     log_ok "Legacy dev server process stopped (if any)"
+  fi
+
+  if flm_should_purge; then
+    rm -f "$NGINX_CONF" 2>/dev/null || true
+    log_ok "Removed generated nginx/flm-standalone.conf"
+  else
+    log_info "Generated nginx conf kept (template + dist preserved)"
   fi
 
   log_summary_box "Frontend Uninstall Complete"

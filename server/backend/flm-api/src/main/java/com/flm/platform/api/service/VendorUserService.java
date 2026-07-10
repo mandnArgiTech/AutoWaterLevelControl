@@ -56,7 +56,7 @@ public class VendorUserService {
     public List<UserSummary> listUsers(UUID vendorId) {
         tenantGuard.requireVendorScope(vendorId);
         return userRepository.findByVendorId(vendorId).stream()
-            .map(u -> new UserSummary(u.getId(), u.getEmail(), u.getDisplayName(), u.getRole(), u.isActive()))
+            .map(u -> new UserSummary(u.getId(), u.getEmail(), u.getDisplayName(), u.getRole(), u.isActive(), u.isMustChangePassword()))
             .toList();
     }
 
@@ -82,6 +82,6 @@ public class VendorUserService {
         u.setPasswordHash(passwordEncoder.encode(req.password()));
         u.setMustChangePassword(true);
         u = userRepository.save(u);
-        return new UserSummary(u.getId(), u.getEmail(), u.getDisplayName(), u.getRole(), u.isActive());
+        return new UserSummary(u.getId(), u.getEmail(), u.getDisplayName(), u.getRole(), u.isActive(), u.isMustChangePassword());
     }
 }

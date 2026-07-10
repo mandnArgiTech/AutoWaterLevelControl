@@ -2,33 +2,58 @@ spring:
   application:
     name: flm-platform
   datasource:
-    url: jdbc:postgresql://localhost:5432/flmDB
-    username: flmAdmin
-    password: flmPass
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/flmDB}
+    username: ${POSTGRES_USER:flmAdmin}
+    password: ${POSTGRES_PASSWORD:flmPass}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
     open-in-view: false
     properties:
       hibernate:
         jdbc:
           time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
 
 server:
   port: 8080
 
 flm:
   jwt:
-    secret: change-me-in-production-use-256-bit-secret-key-here
-    expiry-seconds: 86400
+    secret: ${FLM_JWT_SECRET:change-me-in-production-use-256-bit-secret-key-here-min32}
+  auth:
+    access-token-ttl-seconds: 900
+    refresh-token-ttl-seconds: 2592000
+    step-up-ttl-seconds: 300
+    mfa-required-roles: SUPER_ADMIN
+    max-failed-attempts: 5
+    lockout-minutes: 15
+  web:
+    allowed-origins: ${FLM_WEB_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://vivasvan-tech.in,https://vivasvan-tech.in}
   mqtt:
-    broker-url: tcp://localhost:1883
+    broker-url: ${FLM_MQTT_BROKER_URL:tcp://localhost:1883}
     client-id: flm-platform-bridge
-    username: flmServerAdmin
-    password: flmPass
+    username: ${MQTT_USER_BRIDGE:flmServerAdmin}
+    password: ${MQTT_PASS_BRIDGE:flmPass}
     tls-enabled: false
     topic-filter: "+/water/#"
     qos: 1
+    dynsec-admin-user: ${MQTT_DYNSEC_ADMIN:flmDynsecAdmin}
+    dynsec-admin-password: ${MQTT_DYNSEC_PASS:flmDynsecPass}
+    control-timeout-ms: 5000
+  platform:
+    server-root: ${FLM_SERVER_ROOT:/opt/flm}
+    postgres-compose-file: docker-compose.postgres.yml
+    mqtt-compose-file: docker-compose.mqtt.yml
+    backup-dir: backups
+    sql:
+      max-rows: 500
+      query-timeout-seconds: 30
   seed:
     enabled: true
 
@@ -36,7 +61,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
 
 logging:
   level:
