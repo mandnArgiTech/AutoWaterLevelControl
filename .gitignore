@@ -33,5 +33,20 @@ __pycache__/
 # Secrets (GitHub tokens, credentials)
 .env
 
+# Server platform
+server/.env
+server/logs/
+server/.run/
+server/mosquitto/certs/*
+!server/mosquitto/certs/.gitkeep
+!server/mosquitto/certs/README.md
+server/mosquitto/passwd/passwd
+server/mosquitto/data/
+server/mosquitto/log/
+server/mosquitto/openssl/server.cnf
+server/frontend/node_modules/
+server/frontend/dist/
+server/backend/**/target/
+
 # Generated from index.html (rebuilt by gzip_www.py)
 data/index.html.gz

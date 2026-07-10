@@ -1,0 +1,22 @@
+# Standalone profile — Java API on host, infra via docker-compose.infra.yml
+spring:
+  config:
+    activate:
+      on-profile: standalone
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/flmDB
+    username: flmAdmin
+    password: flmPass
+
+flm:
+  mqtt:
+    broker-url: tcp://localhost:1883
+    username: flmServerAdmin
+    password: flmPass
+    tls-enabled: false
+    topic-filter: "+/water/#"
+
+logging:
+  level:
+    com.flm.platform: INFO

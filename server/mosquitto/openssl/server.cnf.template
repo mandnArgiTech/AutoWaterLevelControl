@@ -1,0 +1,26 @@
+# OpenSSL profile for Mosquitto server certificate — ESP8266 BearSSL compatible
+# - RSA 2048 server key
+# - SHA-256 signature, TLS 1.2
+# - SAN: set via generate-mqtt-certs.sh (DNS + IP) for tlsMode=ca hostname checks
+# - Fingerprint: SHA-1 of server.crt DER → tlsMode=fingerprint on device
+
+[ req ]
+default_bits       = 2048
+default_md         = sha256
+prompt             = no
+distinguished_name = dn
+req_extensions     = v3_req
+
+[ dn ]
+CN = MQTT_SERVER_CN_PLACEHOLDER
+O  = FluidLevelMonitor
+C  = IN
+
+[ v3_req ]
+basicConstraints = critical, CA:false
+keyUsage         = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName   = @alt_names
+
+[ alt_names ]
+# Populated by generate-mqtt-certs.sh

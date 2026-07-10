@@ -51,8 +51,8 @@
 #define DEFAULT_MQTT_ENABLED        false
 #define DEFAULT_MQTT_SERVER         ""
 #define DEFAULT_MQTT_PORT           1883
-#define DEFAULT_MQTT_USER           ""
-#define DEFAULT_MQTT_PASSWORD       ""
+#define DEFAULT_MQTT_USER           "devAdmin"
+#define DEFAULT_MQTT_PASSWORD       "123456"
 #define DEFAULT_MQTT_CLIENT_ID      "FluidMonitor"
 #define DEFAULT_MQTT_DEVICE_NAME    "tank1"
 #define DEFAULT_MQTT_TOPIC_PREFIX   "water"

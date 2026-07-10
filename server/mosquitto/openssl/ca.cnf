@@ -1,0 +1,21 @@
+# OpenSSL profile for FLM MQTT CA — ESP8266 BearSSL compatible
+# - RSA 2048 (BearSSL handles 2048; 4096 risks handshake OOM on ESP8266)
+# - SHA-256 signature
+# - TLS 1.2 trust anchor for tlsMode=ca (/mqtt_ca.pem on device)
+
+[ req ]
+default_bits       = 2048
+default_md         = sha256
+prompt             = no
+distinguished_name = dn
+x509_extensions    = v3_ca
+
+[ dn ]
+CN = FLM MQTT CA
+O  = FluidLevelMonitor
+C  = IN
+
+[ v3_ca ]
+basicConstraints = critical, CA:true
+keyUsage         = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash

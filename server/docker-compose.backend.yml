@@ -1,0 +1,24 @@
+# Backend (Java API) only — requires postgres + mosquitto
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flm-backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://host.docker.internal:5432/${POSTGRES_DB:-flmDB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-flmAdmin}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-flmPass}
+      FLM_JWT_SECRET: ${FLM_JWT_SECRET:-change-me-in-production-use-256-bit-secret-key-here}
+      FLM_MQTT_BROKER_URL: tcp://host.docker.internal:1883
+      FLM_MQTT_USERNAME: ${MQTT_USER_BRIDGE:-flmServerAdmin}
+      FLM_MQTT_PASSWORD: ${MQTT_PASS_BRIDGE:-flmPass}
+      FLM_MQTT_TLS_ENABLED: "false"
+      FLM_MQTT_TOPIC_FILTER: "+/water/#"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${API_PORT:-8080}:8080"
