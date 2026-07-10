@@ -65,7 +65,7 @@
     "timezoneOffset": 19800,
     "ntpServer": "pool.ntp.org",
     "webPort": 80,
-    "debugEnabled": true
+    "debugEnabled": false
   },
   "battery": {
     "calibrationOffset": 0.0,

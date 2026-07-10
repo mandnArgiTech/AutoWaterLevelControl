@@ -236,10 +236,14 @@ void loop() {
 }
 
 void processLoop() {
+    // Service HTTP first — ESP8266WebServer is single-client; delays here stall the UI.
+    if (webServer) webServer->loop();
+
     WiFiManager::getInstance().loop();
     if (WiFiManager::getInstance().isOTAInProgress()) return;
 
     ESP.wdtFeed();
+    if (webServer) webServer->loop();
 
     TimeManager::getInstance().loop();
     MQTTManager::getInstance().loop();
@@ -260,6 +264,7 @@ void processLoop() {
         uint32_t interval = ConfigManager::getInstance().getSensorConfig().readInterval;
         if (flmElapsedMs(lastSensorRead, interval)) {
             readSensor();
+            if (webServer) webServer->loop();
         }
     }
 
@@ -267,6 +272,7 @@ void processLoop() {
     if (mqttCfg.enabled && MQTTManager::getInstance().isConnected()) {
         if (flmElapsedMs(lastMQTTPublish, mqttCfg.publishInterval)) {
             publishMQTT();
+            if (webServer) webServer->loop();
         }
     }
 
@@ -277,12 +283,13 @@ void processLoop() {
     }
 
     yield();
+    if (webServer) webServer->loop();
 
 #ifdef FLM_DEEP_SLEEP_ENABLED
     // Deep sleep mode: after publishing, sleep until next cycle
     static bool hasSentFirstReading = false;
-    MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
-    if (mqttCfg.enabled && MQTTManager::getInstance().isConnected() && hasSentFirstReading) {
+    MQTTConfig& mqttCfgSleep = ConfigManager::getInstance().getMQTTConfig();
+    if (mqttCfgSleep.enabled && MQTTManager::getInstance().isConnected() && hasSentFirstReading) {
         float bv = BatteryMonitor::getInstance().readVoltage();
         uint32_t sleepSec = FLM_SLEEP_SECONDS;
         if (bv < BATT_VOLTAGE_CRITICAL) sleepSec = FLM_SLEEP_CRITICAL;

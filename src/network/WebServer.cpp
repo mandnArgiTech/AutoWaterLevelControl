@@ -116,6 +116,7 @@ void WebServerManager::resumeAfterOTA() {
 
 void WebServerManager::handleRoot() {
     _requestCount++;
+    // Prefer gzip only — skip probing uncompressed first when .gz exists (already in handleFileRead).
     if (!handleFileRead("/index.html")) {
         String html = F("<!DOCTYPE html><html><head>");
         html += F("<meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1'>");
@@ -127,6 +128,7 @@ void WebServerManager::handleRoot() {
         html += F("<p><a href='/calibrate-battery'>Battery A0 Calibration</a></p>");
 #endif
         html += F("</body></html>");
+        _server.sendHeader("Connection", "close");
         _server.send(200, "text/html", html);
     }
 }
@@ -142,23 +144,56 @@ bool WebServerManager::handleFileRead(String path) {
     if (path.endsWith("/")) {
         path += "index.html";
     }
+    // Content-Type from logical name (index.html), not the .gz path.
     String contentType = getContentType(path);
     String pathWithGz = path + ".gz";
-    bool gzipped = LittleFS.exists(pathWithGz);
+    const bool gzipped = LittleFS.exists(pathWithGz);
     if (gzipped) {
         path = pathWithGz;
     } else if (!LittleFS.exists(path)) {
         return false;
     }
+
     File file = LittleFS.open(path, "r");
     if (!file) {
         return false;
     }
+
+    const size_t fileSize = file.size();
+
+    // Do NOT use streamFile() for *.gz — on ESP8266 it auto-adds Content-Encoding,
+    // and any prior sendHeader("Content-Encoding") duplicates it. Browsers then fail
+    // to decode (blank page / endless load). Send headers + body ourselves.
+    _server.sendHeader(F("Connection"), F("close"));
+    _server.sendHeader(F("Cache-Control"), gzipped ? F("public, max-age=60") : F("no-store"));
     if (gzipped) {
-        _server.sendHeader("Content-Encoding", "gzip");
+        _server.sendHeader(F("Content-Encoding"), F("gzip"));
     }
-    _server.streamFile(file, contentType);
+    _server.setContentLength(fileSize);
+    // Use application/octet-stream for the streamFile suppress path is unnecessary —
+    // we send an empty body header then write the file.
+    _server.send(200, contentType, "");
+
+    WiFiClient client = _server.client();
+    uint8_t buf[512];
+    while (file.available() && client.connected()) {
+        size_t n = file.read(buf, sizeof(buf));
+        if (n == 0) break;
+        size_t off = 0;
+        while (off < n && client.connected()) {
+            size_t w = client.write(buf + off, n - off);
+            if (w == 0) {
+                yield();
+                ESP.wdtFeed();
+                continue;
+            }
+            off += w;
+        }
+        yield();
+        ESP.wdtFeed();
+    }
     file.close();
+    client.stop();
     return true;
 }
 
