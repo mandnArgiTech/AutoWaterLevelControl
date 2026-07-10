@@ -76,8 +76,8 @@
 #define DEFAULT_SENSOR_INTERVAL     2000     // ms between readings
 
 // Sensor hardware defaults (NodeMCU pins)
-#define DEFAULT_RX_PIN              5        // D1 / GPIO5 - for UART sensors
-#define DEFAULT_TX_PIN              4        // D2 / GPIO4 - for UART sensors
+#define DEFAULT_RX_PIN              14       // D5 / GPIO14 - for UART sensors (sensor TX -> ESP RX)
+#define DEFAULT_TX_PIN              12       // D6 / GPIO12 - for UART sensors (sensor RX <- ESP TX)
 #define DEFAULT_TRIG_PIN            5        // D1 / GPIO5 - for HC-SR04
 #define DEFAULT_ECHO_PIN            4        // D2 / GPIO4 - for HC-SR04
 #define DEFAULT_SIGNAL_PIN          14       // D5 / GPIO14 - for XKC-KD200
@@ -106,6 +106,13 @@
 #define DEFAULT_NTP_SERVER          "pool.ntp.org"
 #define DEFAULT_WEB_PORT            80
 #define DEFAULT_DEBUG_ENABLED       true
+
+// Battery A0 calibration (D1 Mini — proven ADCA1115Calibration path)
+#define DEFAULT_BATTERY_CAL_OFFSET  0.0f
+#ifndef DEFAULT_BATTERY_CELLS
+#define DEFAULT_BATTERY_CELLS       1
+#endif
+#define DEFAULT_BATTERY_AUTO_CAL    false
 
 // Motor / relay / SMS (motor_* firmware; ignored on sensor_only)
 #define DEFAULT_RELAY_ENABLED           false
@@ -236,6 +243,16 @@ struct SystemConfig {
     bool debugEnabled;          ///< Debug output enabled
 };
 
+/**
+ * @struct BatteryConfig
+ * @brief D1 Mini A0 battery monitor calibration
+ */
+struct BatteryConfig {
+    float calibrationOffset;    ///< actual − measured (Volts)
+    uint8_t cellsInSeries;      ///< 1 = single cell, 2 = 2S pack
+    bool autoCalibration;       ///< true after a successful cal
+};
+
 // =============================================================================
 // SECTION 4: CONFIG MANAGER CLASS
 // =============================================================================
@@ -315,6 +332,7 @@ public:
     TankConfig& getTankConfig() { return _tankConfig; }
     SensorConfig& getSensorConfig() { return _sensorConfig; }
     SystemConfig& getSystemConfig() { return _systemConfig; }
+    BatteryConfig& getBatteryConfig() { return _batteryConfig; }
     
     // Const accessors
     const WiFiConfig& getWiFiConfig() const { return _wifiConfig; }
@@ -322,6 +340,7 @@ public:
     const TankConfig& getTankConfig() const { return _tankConfig; }
     const SensorConfig& getSensorConfig() const { return _sensorConfig; }
     const SystemConfig& getSystemConfig() const { return _systemConfig; }
+    const BatteryConfig& getBatteryConfig() const { return _batteryConfig; }
     MotorConfig& getMotorConfig() { return _motorConfig; }
     const MotorConfig& getMotorConfig() const { return _motorConfig; }
     
@@ -340,7 +359,7 @@ public:
     
     /**
      * @brief Update specific section from JSON
-     * @param section Section name ("wifi", "mqtt", "tank", "sensor", "system", "relay")
+     * @param section Section name ("wifi", "mqtt", "tank", "sensor", "system", "relay", "battery")
      * @param json JSON string for that section
      * @return ErrorCode indicating success or failure
      */
@@ -389,6 +408,7 @@ private:
     void setDefaultTankConfig();
     void setDefaultSensorConfig();
     void setDefaultSystemConfig();
+    void setDefaultBatteryConfig();
     void setDefaultMotorConfig();
     
     // Parse JSON sections
@@ -397,6 +417,7 @@ private:
     void parseTankConfig(const JsonObject& obj);
     void parseSensorConfig(const JsonObject& obj);
     void parseSystemConfig(const JsonObject& obj);
+    void parseBatteryConfig(const JsonObject& obj);
     void parseMotorConfig(const JsonObject& obj);
     
     // Serialize to JSON
@@ -405,6 +426,7 @@ private:
     void serializeTankConfig(JsonObject& obj) const;
     void serializeSensorConfig(JsonObject& obj) const;
     void serializeSystemConfig(JsonObject& obj) const;
+    void serializeBatteryConfig(JsonObject& obj) const;
     void serializeMotorConfig(JsonObject& obj) const;
 
     ErrorCode saveConfigAtomic();
@@ -419,6 +441,7 @@ private:
     TankConfig _tankConfig;     ///< Tank configuration
     SensorConfig _sensorConfig; ///< Sensor configuration
     SystemConfig _systemConfig; ///< System configuration
+    BatteryConfig _batteryConfig; ///< A0 battery calibration
     MotorConfig  _motorConfig;   ///< Relay + SMS motor section (`relay` in JSON)
 
     volatile bool _configWriteLocked;  ///< Serialize HTTP full config POST vs other saves

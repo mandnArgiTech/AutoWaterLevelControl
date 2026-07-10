@@ -9,37 +9,37 @@
     "apMode": false
   },
   "mqtt": {
-    "enabled": false,
+    "enabled": true,
     "server": "vivasvan-tech.in",
-    "port": 8883,
+    "port": 1883,
     "username": "devAdmin",
     "password": "123456",
     "clientId": "FluidMonitor",
-    "deviceName": "tank1",
+    "deviceName": "tank2",
     "topicPrefix": "water",
-    "publishInterval": 60000,
-    "tls": true,
-    "tlsMode": "ca",
-    "fingerprint": ""
+    "publishInterval": 15000,
+    "tls": false,
+    "tlsMode": "fingerprint",
+    "fingerprint": "E1:AA:24:3E:04:C8:8D:04:F5:93:DF:F2:E7:E9:AF:B2:CB:A4:E4:1B"
   },
   "tank": {
     "type": "circular",
-    "diameter": 1350.0,
+    "diameter": 1434.0,
     "length": 0,
     "width": 0,
-    "height": 1704.5,
-    "volumeLiters": 2438.0
+    "height": 1503.0,
+    "volumeLiters": 2000.0
   },
   "sensor": {
     "hardware": {
       "type": "A02YYUW",
-      "rxPin": 5,
-      "txPin": 4,
-      "trigPin": 5,
-      "echoPin": 4,
+      "rxPin": 14,
+      "txPin": 12,
+      "trigPin": 14,
+      "echoPin": 12,
       "signalPin": 14,
-      "mountHeightMm": 500.0,
-      "tankHeightMm": 1704.5,
+      "mountHeightMm": 1503.0,
+      "tankHeightMm": 1503.0,
       "invertedLogic": false
     },
     "offsetMm": 50.0,
@@ -65,7 +65,12 @@
     "timezoneOffset": 19800,
     "ntpServer": "pool.ntp.org",
     "webPort": 80,
-    "debugEnabled": false
+    "debugEnabled": true
+  },
+  "battery": {
+    "calibrationOffset": 0.0,
+    "cellsInSeries": 1,
+    "autoCalibration": false
   },
   "relay": {
     "enabled": false,

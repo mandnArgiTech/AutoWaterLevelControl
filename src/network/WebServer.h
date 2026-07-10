@@ -138,6 +138,12 @@ private:
     void handleApiReset();
     void handleApiInfo();
 
+#ifdef FLM_BATTERY_MONITOR
+    void handleBatteryCalibratePage();
+    void handleApiBatteryCalibrateGet();
+    void handleApiBatteryCalibratePost();
+#endif
+
     // API handlers - Pump (motor_* firmware)
     void handleApiPumpGet();
     void handleApiPumpPost();

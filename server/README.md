@@ -358,7 +358,7 @@ Menu shortcuts: **Main → 9) Remote VPS** or **Install → 7) Remote install**
 
 1. Use **http://hostname/** not **http://hostname:3000/**
 2. Check `./flm-server.sh remote-status`
-3. On **Hostinger** (or other cloud): open ports **80**, **8080**, **8883** in the provider firewall panel (in addition to ufw on the server)
+3. On **Hostinger** (or other cloud): open ports **80**, **8080**, **1883** (plain MQTT), and **8883** (TLS MQTT) in the provider firewall panel (in addition to ufw on the server). Without **1883** / **8883** in the *cloud* panel, devices get `CONNECT_FAILED` even when Mosquitto and ufw look fine.
 4. See [Troubleshooting](#troubleshooting) below
 
 ### Install directly on the VPS (SSH in yourself)
@@ -387,7 +387,20 @@ Then set `FRONTEND_PORT=80` in `.env` and reinstall frontend, or use `remote-ins
 
 ### 5a. Set MQTT on the device
 
-In device `config.json` (or web UI):
+**Option A — Plain MQTT (no TLS, port 1883)** — use when ESP8266 heap is tight:
+
+```json
+"mqtt": {
+  "enabled": true,
+  "server": "vivasvan-tech.in",
+  "port": 1883,
+  "username": "devAdmin",
+  "password": "123456",
+  "tls": false
+}
+```
+
+**Option B — TLS MQTT (port 8883)**:
 
 ```json
 "mqtt": {
@@ -400,6 +413,8 @@ In device `config.json` (or web UI):
   "tlsMode": "ca"
 }
 ```
+
+Open the matching port in the **cloud firewall** (Hostinger panel): **1883** for plain, **8883** for TLS.
 
 ### 5b. Upload CA certificate to device
 

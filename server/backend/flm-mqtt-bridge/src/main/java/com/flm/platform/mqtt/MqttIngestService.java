@@ -20,10 +20,12 @@ import java.util.Optional;
 /**
  * Subscribes to Mosquitto and ingests ESP8266 payloads.
  * Topic: {deviceTag}/{topicPrefix}/{subtopic}  e.g. tank1_a9ad51/water/level
+ *
+ * Device must be registered in {@code devices} — unregistered tags are ignored.
  */
 @Service
 @EnableConfigurationProperties(MqttProperties.class)
-public class MqttIngestService implements MqttCallback {
+public class MqttIngestService implements MqttCallbackExtended {
 
     private static final Logger log = LoggerFactory.getLogger(MqttIngestService.class);
 
@@ -58,8 +60,14 @@ public class MqttIngestService implements MqttCallback {
             options.setPassword(props.getPassword().toCharArray());
         }
         client.connect(options);
+        // Initial subscribe also happens in connectComplete(false, ...)
+        log.info("MQTT bridge connecting to {} filter={}", props.getBrokerUrl(), props.getTopicFilter());
+    }
+
+    private void subscribeTopics() throws MqttException {
+        if (client == null || !client.isConnected()) return;
         client.subscribe(props.getTopicFilter(), props.getQos());
-        log.info("MQTT bridge connected to {} filter={}", props.getBrokerUrl(), props.getTopicFilter());
+        log.info("MQTT bridge subscribed filter={}", props.getTopicFilter());
     }
 
     @PreDestroy
@@ -75,8 +83,19 @@ public class MqttIngestService implements MqttCallback {
     }
 
     @Override
+    public void connectComplete(boolean reconnect, String serverURI) {
+        try {
+            subscribeTopics();
+            log.info("MQTT bridge {} to {}", reconnect ? "reconnected" : "connected", serverURI);
+        } catch (MqttException e) {
+            log.error("MQTT subscribe failed after {}: {}", reconnect ? "reconnect" : "connect", e.getMessage());
+        }
+    }
+
+    @Override
     public void connectionLost(Throwable cause) {
-        log.warn("MQTT connection lost: {}", cause != null ? cause.getMessage() : "unknown");
+        log.warn("MQTT connection lost: {} (auto-reconnect enabled; will re-subscribe on connectComplete)",
+            cause != null ? cause.getMessage() : "unknown");
     }
 
     @Override
@@ -84,7 +103,7 @@ public class MqttIngestService implements MqttCallback {
         try {
             handleMessage(topic, new String(message.getPayload()));
         } catch (Exception e) {
-            log.debug("Skip MQTT message on {}: {}", topic, e.getMessage());
+            log.warn("Skip MQTT message on {}: {}", topic, e.getMessage());
         }
     }
 
@@ -101,7 +120,9 @@ public class MqttIngestService implements MqttCallback {
 
         Optional<Device> deviceOpt = deviceRepository.findByDeviceTag(deviceTag);
         if (deviceOpt.isEmpty()) {
-            log.trace("Unregistered device tag: {}", deviceTag);
+            // Visible in production logs — silent drop is the #1 "MQTT works but UI empty" cause
+            log.warn("Ignoring MQTT {} — deviceTag '{}' is not registered (POST /api/devices)",
+                subtopic, deviceTag);
             return;
         }
         Device device = deviceOpt.get();
@@ -131,6 +152,7 @@ public class MqttIngestService implements MqttCallback {
             device.setOnline(true);
             deviceRepository.save(device);
             readingRepository.save(reading);
+            log.debug("Ingested level for {} pct={}", deviceTag, reading.getPercentFilled());
         }
     }
 

@@ -21,7 +21,7 @@
 #include "../config/ConfigManager.h"
 #include "../utils/ErrorHandler.h"
 
-#define MQTT_BUFFER_SIZE        512
+#define MQTT_BUFFER_SIZE        1024     // level JSON + battery can exceed 512
 #define MQTT_RECONNECT_INTERVAL 5000
 #define MQTT_RECONNECT_MAX_MS   30000u   // 30s cap — pump control needs fast reconnect
 // PubSubClient defines MQTT_KEEPALIVE (15s) before this header can, so use our own name
@@ -38,7 +38,9 @@
 // ---------------------------------------------------------------------------
 #define FLM_TLS_RX_BUF          1024     ///< BearSSL receive buffer (needs broker MFLN)
 #define FLM_TLS_TX_BUF          1024     ///< BearSSL transmit buffer
-#define FLM_TLS_MIN_FREE_HEAP   16000u   ///< Skip handshake below this — prevents OOM reboot
+/** Peak handshake with 1 KB MFLN buffers is ~12–14 KB; keep a small margin. */
+#define FLM_TLS_MIN_FREE_HEAP   14000u
+#define FLM_TLS_MIN_MAX_BLOCK   10000u
 #define MQTT_CA_FILE            "/mqtt_ca.pem"  ///< LittleFS path for CA cert (tlsMode=ca)
 
 enum class MQTTState {
@@ -93,8 +95,12 @@ private:
     void buildDeviceTag();
     /** Create + configure the TLS client per config. Returns false on fatal config error. */
     bool setupTls(const MQTTConfig& config);
+    /** Tear down TLS client objects (reclaim heap after a failed handshake). */
+    void teardownTlsClient();
     /** True when TLS preconditions (heap, NTP time for cert validation) are met. */
     bool tlsReady();
+    /** Log BearSSL / heap diagnostics after a failed connect. */
+    void logTlsFailure();
 
     WiFiClient _wifiClient;
     BearSSL::WiFiClientSecure* _secureClient;  // allocated only when TLS enabled

@@ -1,808 +1,387 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FluidLevelMonitor</title>
-    <style>
-        :root {
-            --bg-primary: #0f172a;
-            --bg-secondary: #1e293b;
-            --bg-card: #334155;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --accent-blue: #38bdf8;
-            --accent-cyan: #22d3d8;
-            --accent-green: #4ade80;
-            --accent-yellow: #fbbf24;
-            --accent-red: #f87171;
-            --accent-purple: #a78bfa;
-            --border-color: #475569;
-            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: system-ui, sans-serif;
-            background: linear-gradient(135deg, var(--bg-primary) 0%, #1a1a2e 100%);
-            color: var(--text-primary);
-            min-height: 100vh;
-        }
-        header {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border-color);
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .logo h1 {
-            font-size: 1.25rem;
-            background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .status-indicators { display: flex; gap: 1rem; }
-        .status-dot {
-            display: flex; align-items: center; gap: 0.5rem;
-            font-size: 0.75rem; color: var(--text-secondary);
-        }
-        .status-dot::before {
-            content: ''; width: 8px; height: 8px; border-radius: 50%;
-            background: var(--accent-red);
-        }
-        .status-dot.connected::before {
-            background: var(--accent-green);
-            box-shadow: 0 0 8px var(--accent-green);
-        }
-        main { max-width: 1400px; margin: 0 auto; padding: 2rem; display: grid; gap: 1.5rem; }
-        .tank-section {
-            display: grid; grid-template-columns: 300px 1fr; gap: 2rem;
-            background: var(--bg-secondary); border-radius: 16px; padding: 2rem;
-            border: 1px solid var(--border-color);
-        }
-        .tank-visual { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
-        .tank-container {
-            width: 180px; height: 280px; background: var(--bg-card);
-            border: 3px solid var(--border-color); border-radius: 0 0 90px 90px;
-            position: relative; overflow: hidden;
-        }
-        .water {
-            position: absolute; bottom: 0; left: 0; right: 0;
-            background: linear-gradient(180deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
-            transition: height 0.5s ease-out; border-radius: 0 0 85px 85px;
-        }
-        .water::before {
-            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 15px;
-            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
-            animation: wave 2s ease-in-out infinite;
-        }
-        @keyframes wave { 0%, 100% { transform: translateX(-20%); } 50% { transform: translateX(20%); } }
-        .percentage-display {
-            font-size: 3rem; font-weight: 700; font-family: var(--font-mono);
-            background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .remaining-display { font-size: 1rem; color: var(--text-secondary); }
-        .tank-state {
-            padding: 0.25rem 1rem; border-radius: 20px;
-            font-size: 0.875rem; font-weight: 500; text-transform: uppercase;
-        }
-        .tank-state.full { background: var(--accent-green); color: #000; }
-        .tank-state.high { background: var(--accent-cyan); color: #000; }
-        .tank-state.medium { background: var(--accent-blue); color: #fff; }
-        .tank-state.low { background: var(--accent-yellow); color: #000; }
-        .tank-state.empty { background: var(--accent-red); color: #fff; }
-        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
-        .stat-card {
-            background: var(--bg-card); border-radius: 12px; padding: 1.25rem;
-            border: 1px solid var(--border-color);
-        }
-        .stat-label {
-            font-size: 0.75rem; color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem;
-        }
-        .stat-value {
-            font-size: 1.5rem; font-weight: 600; font-family: var(--font-mono);
-            color: var(--accent-cyan);
-        }
-        .stat-unit { font-size: 0.875rem; color: var(--text-secondary); margin-left: 0.25rem; }
-        .tabs {
-            display: flex; gap: 0.5rem; background: var(--bg-secondary);
-            padding: 0.5rem; border-radius: 12px; border: 1px solid var(--border-color);
-            flex-wrap: wrap;
-        }
-        .tab {
-            flex: 1; min-width: 80px; padding: 0.75rem 1rem; border: none;
-            background: transparent; color: var(--text-secondary);
-            font-size: 0.875rem; font-weight: 500; cursor: pointer;
-            border-radius: 8px; transition: all 0.2s;
-        }
-        .tab:hover { color: var(--text-primary); background: var(--bg-card); }
-        .tab.active { background: var(--accent-blue); color: #fff; }
-        .config-panel {
-            display: none; background: var(--bg-secondary); border-radius: 16px;
-            padding: 2rem; border: 1px solid var(--border-color);
-        }
-        .config-panel.active { display: block; }
-        .panel-header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color);
-        }
-        .panel-title { font-size: 1.25rem; font-weight: 600; }
-        .form-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;
-        }
-        .form-group { display: flex; flex-direction: column; gap: 0.5rem; }
-        .form-group label { font-size: 0.875rem; color: var(--text-secondary); }
-        .form-group input, .form-group select {
-            padding: 0.75rem 1rem; background: var(--bg-card);
-            border: 1px solid var(--border-color); border-radius: 8px;
-            color: var(--text-primary); font-size: 0.875rem; font-family: var(--font-mono);
-        }
-        .form-group input:focus, .form-group select:focus {
-            outline: none; border-color: var(--accent-blue);
-            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
-        }
-        .btn {
-            padding: 0.75rem 1.5rem; border: none; border-radius: 8px;
-            font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: all 0.2s;
-        }
-        .btn-primary { background: var(--accent-blue); color: #fff; }
-        .btn-primary:hover { background: #2563eb; transform: translateY(-1px); }
-        .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); }
-        .btn-danger { background: var(--accent-red); color: #fff; }
-        .btn-group { display: flex; gap: 0.75rem; margin-top: 1.5rem; flex-wrap: wrap; }
-        /* Calibration Section */
-        .calibration-section {
-            background: var(--bg-card); border-radius: 12px; padding: 1.5rem;
-            border: 1px solid var(--border-color); margin-bottom: 1.5rem;
-        }
-        .calibration-display {
-            text-align: center; padding: 2rem;
-            background: var(--bg-primary); border-radius: 12px; margin-bottom: 1rem;
-        }
-        .calibration-value {
-            font-size: 4rem; font-weight: 700; font-family: var(--font-mono);
-            color: var(--accent-cyan);
-        }
-        .calibration-unit { font-size: 1.5rem; color: var(--text-secondary); }
-        .calibration-status {
-            display: flex; justify-content: center; gap: 2rem; margin-top: 1rem;
-        }
-        .calibration-status span { color: var(--text-secondary); font-size: 0.875rem; }
-        .calibration-status .value { color: var(--accent-cyan); font-family: var(--font-mono); }
-        .offset-control {
-            display: flex; align-items: center; gap: 1rem; margin-top: 1rem;
-        }
-        .offset-control input[type="range"] {
-            flex: 1; height: 8px; background: var(--bg-primary);
-            border-radius: 4px; appearance: none;
-        }
-        .offset-control input[type="range"]::-webkit-slider-thumb {
-            appearance: none; width: 20px; height: 20px; background: var(--accent-blue);
-            border-radius: 50%; cursor: pointer;
-        }
-        .ws-status {
-            display: inline-flex; align-items: center; gap: 0.5rem;
-            padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem;
-            background: var(--bg-primary);
-        }
-        .ws-status.connected { color: var(--accent-green); }
-        .ws-status.disconnected { color: var(--accent-red); }
-        .toast-container {
-            position: fixed; bottom: 2rem; right: 2rem;
-            display: flex; flex-direction: column; gap: 0.5rem; z-index: 1000;
-        }
-        .toast {
-            padding: 1rem 1.5rem; border-radius: 8px; background: var(--bg-card);
-            border: 1px solid var(--border-color); animation: slideIn 0.3s ease-out;
-        }
-        .toast.success { border-color: var(--accent-green); }
-        .toast.error { border-color: var(--accent-red); }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @media (max-width: 768px) {
-            .tank-section { grid-template-columns: 1fr; }
-            .stats-grid { grid-template-columns: 1fr; }
-            main { padding: 1rem; }
-            header { padding: 1rem; flex-direction: column; gap: 1rem; }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FluidLevelMonitor</title>
+<style>
+:root{
+  --bg:#f4f7fb;--card:#fff;--ink:#1b2733;--muted:#5b6b7b;
+  --line:#d8e2ec;--accent:#0a84ff;--ok:#1fa971;--warn:#e6a100;--err:#e0453e;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  background:var(--bg);color:var(--ink);font-size:18px;line-height:1.4;-webkit-text-size-adjust:100%}
+header{background:var(--card);border-bottom:2px solid var(--line);
+  padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+h1{font-size:1.45rem;font-weight:800;color:var(--accent);letter-spacing:-.02em}
+.dots{display:flex;gap:14px;align-items:center}
+.dot{display:flex;align-items:center;gap:7px;font-size:.95rem;font-weight:600;color:var(--muted)}
+.dot::before{content:'';width:12px;height:12px;border-radius:50%;background:var(--err)}
+.dot.on::before{background:var(--ok)}
+.age{font-size:.85rem;color:var(--muted);font-weight:600}
+main{max-width:960px;margin:0 auto;padding:16px;display:grid;gap:16px}
+.card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:18px}
+.hero{display:grid;grid-template-columns:180px 1fr;gap:20px;align-items:center}
+.tank{width:150px;height:220px;margin:0 auto;background:#eef3f8;border:4px solid var(--line);
+  border-radius:0 0 70px 70px;position:relative;overflow:hidden}
+.fill{position:absolute;bottom:0;left:0;right:0;height:0;background:linear-gradient(180deg,#4db8ff,#0a84ff);
+  transition:height .35s ease-out;border-radius:0 0 64px 64px;will-change:height}
+.big{font-size:3.4rem;font-weight:800;text-align:center;color:var(--accent);line-height:1}
+.sub{text-align:center;color:var(--muted);font-size:1rem;margin-top:4px}
+.pill{display:inline-block;margin:8px auto 0;padding:5px 14px;border-radius:99px;
+  font-size:.9rem;font-weight:700;text-transform:uppercase;background:var(--accent);color:#fff}
+.pill.full{background:var(--ok)}.pill.high{background:#28a3d6}.pill.medium{background:var(--accent)}
+.pill.low{background:var(--warn);color:#000}.pill.empty,.pill.sensor_error{background:var(--err)}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.stat{background:var(--bg);border:2px solid var(--line);border-radius:12px;padding:12px 14px}
+.stat .k{font-size:.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.stat .v{font-size:1.7rem;font-weight:800;margin-top:2px}
+.stat .u{font-size:.9rem;font-weight:600;color:var(--muted);margin-left:3px}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tab{flex:1;min-width:100px;padding:12px;border:2px solid var(--line);background:var(--card);
+  color:var(--muted);font-size:1rem;font-weight:700;border-radius:10px;cursor:pointer}
+.tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.panel{display:none}
+.panel.active{display:block}
+.ptitle{font-size:1.25rem;font-weight:800;margin-bottom:14px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+label{display:block;font-size:.95rem;font-weight:600;color:var(--muted);margin-bottom:5px}
+input,select{width:100%;padding:12px;font-size:1.05rem;border:2px solid var(--line);
+  border-radius:10px;background:#fff;color:var(--ink)}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+.check{display:flex;align-items:center;gap:10px;font-size:1.05rem;font-weight:600;color:var(--ink)}
+.check input{width:22px;height:22px}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.btn{padding:12px 20px;font-size:1.05rem;font-weight:700;border:none;border-radius:10px;cursor:pointer;background:var(--accent);color:#fff}
+.btn:disabled{opacity:.55;cursor:wait}
+.btn.sec{background:#eaf0f6;color:var(--ink);border:2px solid var(--line)}
+.btn.danger{background:var(--err);color:#fff}
+.calbig{text-align:center;background:var(--bg);border-radius:12px;padding:22px;margin-bottom:14px}
+.calbig .v{font-size:3.8rem;font-weight:800;color:var(--accent);line-height:1}
+.calbig .u{font-size:1.05rem;color:var(--muted)}
+.calrow{display:flex;justify-content:center;gap:24px;flex-wrap:wrap;margin-top:10px;font-size:1rem;color:var(--muted)}
+.calrow b{color:var(--ink)}
+.slider{display:flex;gap:12px;align-items:center;margin-top:8px}
+.slider input[type=range]{flex:1;height:12px}
+.slider input[type=number]{width:100px}
+.hint{color:var(--muted);font-size:.95rem;margin-top:10px}
+.tag{display:inline-block;padding:4px 12px;border-radius:99px;font-size:.85rem;font-weight:700;background:#e6f7ee;color:var(--ok)}
+.tag.off{background:#fdecea;color:var(--err)}
+.bar{background:var(--bg);border:2px solid var(--line);border-radius:8px;height:12px;overflow:hidden;margin:12px 0}
+.bar>div{height:100%;width:0;background:var(--accent);transition:width .15s}
+.toasts{position:fixed;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:99}
+.toast{padding:12px 16px;font-size:1rem;font-weight:600;border-radius:10px;background:#fff;border:2px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.1)}
+.toast.success{border-color:var(--ok)}.toast.error{border-color:var(--err)}
+code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
+@media(max-width:640px){
+  .hero{grid-template-columns:1fr}
+  .grid{grid-template-columns:1fr}
+  .big{font-size:3rem}
+}
+</style>
 </head>
 <body>
-    <header>
-        <div class="logo"><h1>FluidLevelMonitor</h1></div>
-        <div class="status-indicators">
-            <div class="status-dot" id="wifi-status">WiFi</div>
-            <div class="status-dot" id="mqtt-status">MQTT</div>
-        </div>
-    </header>
+<header>
+  <h1>FluidLevelMonitor</h1>
+  <div class="dots">
+    <div class="dot" id="wifi-status">WiFi</div>
+    <div class="dot" id="mqtt-status">MQTT</div>
+    <span class="age" id="poll-age">…</span>
+  </div>
+</header>
 
-    <main>
-        <section class="tank-section">
-            <div class="tank-visual">
-                <div class="tank-container">
-                    <div class="water" id="water-level" style="height: 0%"></div>
-                </div>
-                <div class="percentage-display" id="percentage">0%</div>
-                <div class="remaining-display">Remaining: <span id="remaining">100</span>%</div>
-                <div class="tank-state medium" id="tank-state">Loading</div>
-            </div>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-label">Water Height</div>
-                    <div class="stat-value" id="height">0<span class="stat-unit">cm</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Volume</div>
-                    <div class="stat-value" id="volume">0<span class="stat-unit">L</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Remaining</div>
-                    <div class="stat-value" id="vol-remaining">0<span class="stat-unit">L</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Distance</div>
-                    <div class="stat-value" id="distance">0<span class="stat-unit">cm</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Temperature</div>
-                    <div class="stat-value" id="temperature">--<span class="stat-unit">°C</span></div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Uptime</div>
-                    <div class="stat-value" id="uptime" style="font-size: 1rem;">--</div>
-                </div>
-            </div>
-        </section>
+<main>
+  <section class="card hero">
+    <div>
+      <div class="tank"><div class="fill" id="water-level"></div></div>
+      <div class="big" id="percentage">—</div>
+      <div class="sub">Remaining <span id="remaining">—</span>%</div>
+      <div style="text-align:center"><span class="pill" id="tank-state">…</span></div>
+    </div>
+    <div class="grid">
+      <div class="stat"><div class="k">Water Height</div><div class="v" id="height">—<span class="u">cm</span></div></div>
+      <div class="stat"><div class="k">Volume</div><div class="v" id="volume">—<span class="u">L</span></div></div>
+      <div class="stat"><div class="k">Remaining</div><div class="v" id="vol-remaining">—<span class="u">L</span></div></div>
+      <div class="stat"><div class="k">Distance</div><div class="v" id="distance">—<span class="u">cm</span></div></div>
+      <div class="stat"><div class="k">Temperature</div><div class="v" id="temperature">—<span class="u">&deg;C</span></div></div>
+      <div class="stat"><div class="k">Battery</div><div class="v" id="battery">—<span class="u">V</span></div></div>
+    </div>
+  </section>
 
-        <nav class="tabs">
-            <button class="tab active" data-panel="calibration">Calibration</button>
-            <button class="tab" data-panel="wifi">WiFi</button>
-            <button class="tab" data-panel="mqtt">MQTT</button>
-            <button class="tab" data-panel="tank">Tank</button>
-            <button class="tab" data-panel="sensor">Sensor</button>
-            <button class="tab" data-panel="system">System</button>
-            <button class="tab" data-panel="firmware">Firmware</button>
-        </nav>
+  <nav class="tabs">
+    <button class="tab active" data-panel="calibration">Calibration</button>
+    <button class="tab" data-panel="wifi">WiFi</button>
+    <button class="tab" data-panel="mqtt">MQTT</button>
+    <button class="tab" data-panel="tank">Tank</button>
+    <button class="tab" data-panel="sensor">Sensor</button>
+    <button class="tab" data-panel="system">System</button>
+    <button class="tab" data-panel="firmware">Firmware</button>
+  </nav>
 
-        <!-- Calibration Panel -->
-        <section class="config-panel active" id="panel-calibration">
-            <div class="panel-header">
-                <h2 class="panel-title">Sensor Calibration</h2>
-                <span class="ws-status disconnected" id="ws-status">● Disconnected</span>
-            </div>
-            <div class="calibration-section">
-                <div class="calibration-display">
-                    <div class="calibration-value" id="cal-distance">--</div>
-                    <div class="calibration-unit">cm (distance to water)</div>
-                </div>
-                <div class="calibration-status">
-                    <span>Water Height: <span class="value" id="cal-height">--</span> cm</span>
-                    <span>Level: <span class="value" id="cal-percent">--</span>%</span>
-                    <span>Valid: <span class="value" id="cal-valid">--</span></span>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Calibration Offset (cm) - Adjust until distance reading is accurate</label>
-                <div class="offset-control">
-                    <input type="range" id="offset-slider" min="-50" max="50" step="0.1" value="0">
-                    <input type="number" id="offset-value" value="0" step="0.1" style="width: 80px;">
-                </div>
-            </div>
-            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 1rem;">
-                <strong>Calibration Instructions:</strong><br>
-                1. Place a known object at a measured distance from the sensor<br>
-                2. Adjust the offset until the displayed distance matches the actual distance<br>
-                3. Click "Save Calibration" to store the offset permanently
-            </p>
-            <div class="btn-group">
-                <button class="btn btn-primary" onclick="saveCalibration()">Save Calibration</button>
-                <button class="btn btn-secondary" onclick="resetCalibration()">Reset to Zero</button>
-                <button class="btn btn-secondary" onclick="connectCalibrationWS()">Reconnect WS</button>
-            </div>
-        </section>
+  <section class="card panel active" id="panel-calibration">
+    <div class="ptitle">Sensor Calibration <span class="tag" id="cal-poll-status">Live</span></div>
+    <div class="calbig">
+      <div class="v" id="cal-distance">—</div>
+      <div class="u">cm — distance to water</div>
+      <div class="calrow">
+        <span>Height <b id="cal-height">—</b> cm</span>
+        <span>Level <b id="cal-percent">—</b>%</span>
+        <span>Valid <b id="cal-valid">—</b></span>
+      </div>
+    </div>
+    <label>Calibration Offset (cm)</label>
+    <div class="slider">
+      <input type="range" id="offset-slider" min="-50" max="50" step="0.1" value="0">
+      <input type="number" id="offset-value" value="0" step="0.1">
+    </div>
+    <p class="hint">Match the distance to your tape measure, then Save.</p>
+    <div class="btns">
+      <button class="btn" onclick="saveCalibration()">Save Calibration</button>
+      <button class="btn sec" onclick="resetCalibration()">Reset to Zero</button>
+    </div>
+  </section>
 
-        <!-- WiFi Panel -->
-        <section class="config-panel" id="panel-wifi">
-            <div class="panel-header">
-                <h2 class="panel-title">WiFi Configuration</h2>
-                <button class="btn btn-secondary" onclick="scanWiFi()">Scan Networks</button>
-            </div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>SSID</label>
-                    <input type="text" id="wifi-ssid" placeholder="Network name">
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="wifi-password" placeholder="Password">
-                </div>
-                <div class="form-group">
-                    <label>Hostname</label>
-                    <input type="text" id="wifi-hostname" placeholder="FluidMonitor">
-                </div>
-            </div>
-            <div id="wifi-networks" style="display:none; max-height:200px; overflow-y:auto; margin-top:1rem; border:1px solid var(--border-color); border-radius:8px;"></div>
-            <div class="btn-group">
-                <button class="btn btn-primary" onclick="saveConfig('wifi')">Save WiFi Settings</button>
-            </div>
-        </section>
+  <section class="card panel" id="panel-wifi">
+    <div class="ptitle">WiFi</div>
+    <div class="row">
+      <div><label>SSID</label><input type="text" id="wifi-ssid" placeholder="Network name"></div>
+      <div><label>Password</label><input type="password" id="wifi-password" placeholder="Password"></div>
+      <div><label>Hostname</label><input type="text" id="wifi-hostname" placeholder="FluidMonitor"></div>
+    </div>
+    <div id="wifi-networks" style="display:none;max-height:220px;overflow-y:auto;margin-top:12px;border:2px solid var(--line);border-radius:10px"></div>
+    <div class="btns">
+      <button class="btn sec" onclick="scanWiFi()">Scan Networks</button>
+      <button class="btn" onclick="saveConfig('wifi')">Save WiFi</button>
+    </div>
+  </section>
 
-        <!-- MQTT Panel -->
-        <section class="config-panel" id="panel-mqtt">
-            <div class="panel-header"><h2 class="panel-title">MQTT Configuration</h2></div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label><input type="checkbox" id="mqtt-enabled"> Enable MQTT</label>
-                </div>
-                <div class="form-group">
-                    <label>Server</label>
-                    <input type="text" id="mqtt-server" placeholder="192.168.1.100">
-                </div>
-                <div class="form-group">
-                    <label>Port</label>
-                    <input type="number" id="mqtt-port" value="1883">
-                </div>
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="mqtt-username" placeholder="Required for cloud brokers">
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="mqtt-password" placeholder="Required for cloud brokers">
-                </div>
-                <div class="form-group">
-                    <label>Device Name (used in topic path)</label>
-                    <input type="text" id="mqtt-device-name" placeholder="tank1">
-                </div>
-                <div class="form-group">
-                    <label>Topic Prefix</label>
-                    <input type="text" id="mqtt-topic" placeholder="home/water">
-                </div>
-                <div class="form-group">
-                    <label>Publish Interval (ms)</label>
-                    <input type="number" id="mqtt-interval" value="60000">
-                </div>
-            </div>
-            <div style="background:var(--bg-card);border-radius:8px;padding:1rem;margin-top:1rem;border:1px solid var(--border-color);">
-                <div class="stat-label">Topic Preview</div>
-                <div style="font-family:var(--font-mono);color:var(--accent-cyan);font-size:0.9rem;margin-top:0.5rem;" id="mqtt-topic-preview">--</div>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-primary" onclick="saveConfig('mqtt')">Save MQTT Settings</button>
-            </div>
-        </section>
+  <section class="card panel" id="panel-mqtt">
+    <div class="ptitle">MQTT</div>
+    <div class="row">
+      <div><label class="check"><input type="checkbox" id="mqtt-enabled"> Enable MQTT</label></div>
+      <div><label>Server</label><input type="text" id="mqtt-server" placeholder="broker host"></div>
+      <div><label>Port</label><input type="number" id="mqtt-port" value="1883"></div>
+      <div><label>Username</label><input type="text" id="mqtt-username"></div>
+      <div><label>Password</label><input type="password" id="mqtt-password"></div>
+      <div><label>Device Name</label><input type="text" id="mqtt-device-name" placeholder="tank1"></div>
+      <div><label>Topic Prefix</label><input type="text" id="mqtt-topic" placeholder="water"></div>
+      <div><label>Publish Interval (ms)</label><input type="number" id="mqtt-interval" value="60000"></div>
+    </div>
+    <div class="stat" style="margin-top:14px">
+      <div class="k">Topic Preview</div>
+      <div id="mqtt-topic-preview" style="font-weight:700;color:var(--accent);margin-top:4px">—</div>
+    </div>
+    <div class="btns"><button class="btn" onclick="saveConfig('mqtt')">Save MQTT</button></div>
+  </section>
 
-        <!-- Tank Panel -->
-        <section class="config-panel" id="panel-tank">
-            <div class="panel-header"><h2 class="panel-title">Tank Configuration</h2></div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Tank Type</label>
-                    <select id="tank-type">
-                        <option value="circular">Circular</option>
-                        <option value="rectangular">Rectangular</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Diameter (cm) - Circular</label>
-                    <input type="number" id="tank-diameter" value="135" step="0.1">
-                </div>
-                <div class="form-group">
-                    <label>Height (cm)</label>
-                    <input type="number" id="tank-height" value="170.45" step="0.1">
-                </div>
-                <div class="form-group">
-                    <label>Volume (Liters) - Calculated</label>
-                    <input type="number" id="tank-volume" readonly>
-                </div>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-primary" onclick="saveConfig('tank')">Save Tank Settings</button>
-            </div>
-        </section>
+  <section class="card panel" id="panel-tank">
+    <div class="ptitle">Tank</div>
+    <div class="row">
+      <div><label>Tank Type</label><select id="tank-type"><option value="circular">Circular</option><option value="rectangular">Rectangular</option></select></div>
+      <div><label>Diameter (cm)</label><input type="number" id="tank-diameter" value="143.4" step="0.1"></div>
+      <div><label>Height (cm)</label><input type="number" id="tank-height" value="150.3" step="0.1"></div>
+      <div><label>Volume (L)</label><input type="number" id="tank-volume" readonly></div>
+    </div>
+    <div class="btns"><button class="btn" onclick="saveConfig('tank')">Save Tank</button></div>
+  </section>
 
-        <!-- Sensor Panel -->
-        <section class="config-panel" id="panel-sensor">
-            <div class="panel-header"><h2 class="panel-title">Sensor Configuration</h2></div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Sensor Offset (cm)</label>
-                    <input type="number" id="sensor-offset" value="5" step="0.1">
-                </div>
-                <div class="form-group">
-                    <label>Samples for Averaging</label>
-                    <input type="number" id="sensor-samples" value="5">
-                </div>
-                <div class="form-group">
-                    <label>Read Interval (ms)</label>
-                    <input type="number" id="sensor-interval" value="500">
-                </div>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-primary" onclick="saveConfig('sensor')">Save Sensor Settings</button>
-            </div>
-        </section>
+  <section class="card panel" id="panel-sensor">
+    <div class="ptitle">Sensor</div>
+    <div class="row">
+      <div><label>Sensor Offset (cm)</label><input type="number" id="sensor-offset" value="5" step="0.1"></div>
+      <div><label>Samples</label><input type="number" id="sensor-samples" value="5"></div>
+      <div><label>Read Interval (ms)</label><input type="number" id="sensor-interval" value="2000"></div>
+    </div>
+    <div class="btns"><button class="btn" onclick="saveConfig('sensor')">Save Sensor</button></div>
+  </section>
 
-        <!-- Firmware OTA Panel -->
-        <section class="config-panel" id="panel-firmware">
-            <div class="panel-header"><h2 class="panel-title">Firmware Update</h2></div>
-            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
-                Upload a <code>.bin</code> from PlatformIO: <code>pio run</code> then use
-                <code>.pio/build/nodemcuv2/firmware.bin</code>. Device reboots on success.
-                Keep WiFi stable during upload (~30–60s).
-            </p>
-            <div class="form-group">
-                <label>Current firmware</label>
-                <div id="fw-current" style="font-family:var(--font-mono);color:var(--accent-cyan);">—</div>
-            </div>
-            <div class="form-group">
-                <label>Firmware file (.bin)</label>
-                <input type="file" id="fw-file" accept=".bin,application/octet-stream">
-            </div>
-            <div style="background:var(--bg-card);border-radius:8px;height:8px;overflow:hidden;margin:1rem 0;border:1px solid var(--border-color);">
-                <div id="fw-progress" style="height:100%;width:0%;background:var(--accent-blue);transition:width 0.2s;"></div>
-            </div>
-            <div id="fw-status" style="font-size:0.875rem;color:var(--text-secondary);"></div>
-            <div class="btn-group">
-                <button class="btn btn-primary" id="fw-upload-btn" onclick="uploadFirmware()">Upload &amp; install</button>
-            </div>
-        </section>
+  <section class="card panel" id="panel-firmware">
+    <div class="ptitle">Firmware Update</div>
+    <p class="hint">Upload a <code>.bin</code> from PlatformIO. Device reboots on success.</p>
+    <div style="margin-top:12px"><label>Current firmware</label><div id="fw-current" style="font-weight:700;color:var(--accent)">—</div></div>
+    <div style="margin-top:12px"><label>Firmware file (.bin)</label><input type="file" id="fw-file" accept=".bin,application/octet-stream"></div>
+    <div class="bar"><div id="fw-progress"></div></div>
+    <div id="fw-status" class="hint"></div>
+    <div class="btns"><button class="btn" id="fw-upload-btn" onclick="uploadFirmware()">Upload &amp; Install</button></div>
+  </section>
 
-        <!-- System Panel -->
-        <section class="config-panel" id="panel-system">
-            <div class="panel-header"><h2 class="panel-title">System</h2></div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>Device Name</label>
-                    <input type="text" id="system-name" placeholder="Water Tank Monitor">
-                </div>
-                <div class="form-group">
-                    <label>Timezone Offset (seconds)</label>
-                    <input type="number" id="system-timezone" value="19800">
-                </div>
-                <div class="form-group">
-                    <label><input type="checkbox" id="system-debug" checked> Debug Mode</label>
-                </div>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-primary" onclick="saveConfig('system')">Save</button>
-                <button class="btn btn-secondary" onclick="restartDevice()">Restart</button>
-                <button class="btn btn-danger" onclick="factoryReset()">Factory Reset</button>
-            </div>
-        </section>
-    </main>
+  <section class="card panel" id="panel-system">
+    <div class="ptitle">System</div>
+    <div class="row">
+      <div><label>Device Name</label><input type="text" id="system-name" placeholder="Water Tank Monitor"></div>
+      <div><label>Timezone Offset (s)</label><input type="number" id="system-timezone" value="19800"></div>
+      <div><label class="check"><input type="checkbox" id="system-debug" checked> Debug Mode</label></div>
+    </div>
+    <div class="btns">
+      <button class="btn" onclick="saveConfig('system')">Save</button>
+      <button class="btn sec" onclick="restartDevice()">Restart</button>
+      <button class="btn danger" onclick="factoryReset()">Factory Reset</button>
+    </div>
+  </section>
+</main>
 
-    <div class="toast-container" id="toast-container"></div>
+<div class="toasts" id="toast-container"></div>
 
-    <script>
-        const API_BASE = '/api';
-        let calibrationWS = null;
-        let refreshInterval = null;
+<script>
+const API='/api';
+const $=id=>document.getElementById(id);
+const n=(v,d=1)=>Number.isFinite(+v)?(+v).toFixed(d):'—';
+const setV=(id,val,unit)=>{const el=$(id);if(el)el.innerHTML=val+'<span class="u">'+unit+'</span>';};
 
-        // Tab Navigation
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
-                tab.classList.add('active');
-                document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
-                if (tab.dataset.panel === 'calibration') connectCalibrationWS();
-                else loadSectionData(tab.dataset.panel);
-            });
-        });
+let busy=false, lastOk=0, activePanel='calibration', cfgLoaded={};
 
-        function uploadFirmware() {
-            const input = document.getElementById('fw-file');
-            const bar = document.getElementById('fw-progress');
-            const st = document.getElementById('fw-status');
-            const btn = document.getElementById('fw-upload-btn');
-            if (!input.files || !input.files[0]) {
-                showToast('Select a .bin file', 'error');
-                return;
-            }
-            const file = input.files[0];
-            btn.disabled = true;
-            bar.style.width = '0%';
-            st.textContent = 'Uploading…';
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/api/update');
-            xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                    bar.style.width = Math.round(100 * e.loaded / e.total) + '%';
-                }
-            };
-            xhr.onload = () => {
-                btn.disabled = false;
-                if (xhr.status === 200) {
-                    st.textContent = 'Success — rebooting…';
-                    showToast('Firmware installed. Reconnect in ~10s.', 'success');
-                    bar.style.width = '100%';
-                } else {
-                    st.textContent = xhr.responseText || 'Update failed';
-                    showToast('Firmware update failed', 'error');
-                    bar.style.width = '0%';
-                }
-            };
-            xhr.onerror = () => {
-                btn.disabled = false;
-                st.textContent = 'Network error';
-                showToast('Upload failed', 'error');
-            };
-            const fd = new FormData();
-            fd.append('firmware', file, file.name || 'firmware.bin');
-            xhr.send(fd);
-        }
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  t.classList.add('active');
+  activePanel=t.dataset.panel;
+  $('panel-'+activePanel).classList.add('active');
+  if(activePanel==='calibration') loadCalibrationOffset();
+  else loadSectionData(activePanel);
+}));
 
-        // Offset slider sync
-        document.getElementById('offset-slider').addEventListener('input', (e) => {
-            document.getElementById('offset-value').value = e.target.value;
-            if (calibrationWS && calibrationWS.readyState === WebSocket.OPEN) {
-                calibrationWS.send(JSON.stringify({cmd: 'setOffset', offset: parseFloat(e.target.value)}));
-            }
-        });
-        document.getElementById('offset-value').addEventListener('change', (e) => {
-            document.getElementById('offset-slider').value = e.target.value;
-            if (calibrationWS && calibrationWS.readyState === WebSocket.OPEN) {
-                calibrationWS.send(JSON.stringify({cmd: 'setOffset', offset: parseFloat(e.target.value)}));
-            }
-        });
+$('offset-slider').addEventListener('input',e=>$('offset-value').value=e.target.value);
+$('offset-value').addEventListener('change',e=>$('offset-slider').value=e.target.value);
 
-        // WebSocket for calibration
-        function connectCalibrationWS() {
-            if (calibrationWS) calibrationWS.close();
-            const wsUrl = 'ws://' + window.location.hostname + ':81/';
-            calibrationWS = new WebSocket(wsUrl);
-            
-            calibrationWS.onopen = () => {
-                document.getElementById('ws-status').textContent = '● Connected';
-                document.getElementById('ws-status').className = 'ws-status connected';
-                calibrationWS.send(JSON.stringify({cmd: 'getStatus'}));
-            };
-            calibrationWS.onclose = () => {
-                document.getElementById('ws-status').textContent = '● Disconnected';
-                document.getElementById('ws-status').className = 'ws-status disconnected';
-            };
-            calibrationWS.onerror = () => {
-                showToast('WebSocket error', 'error');
-            };
-            calibrationWS.onmessage = (e) => {
-                const data = JSON.parse(e.data);
-                if (data.type === 'reading') {
-                    document.getElementById('cal-distance').textContent = data.distanceCm.toFixed(1);
-                    document.getElementById('cal-height').textContent = data.waterHeightCm.toFixed(1);
-                    document.getElementById('cal-percent').textContent = data.percentFilled.toFixed(1);
-                    document.getElementById('cal-valid').textContent = data.valid ? 'Yes' : 'No';
-                } else if (data.type === 'status') {
-                    document.getElementById('offset-slider').value = data.currentOffsetCm || 0;
-                    document.getElementById('offset-value').value = data.currentOffsetCm || 0;
-                } else if (data.type === 'saveResult') {
-                    showToast(data.success ? 'Calibration saved!' : 'Save failed', data.success ? 'success' : 'error');
-                }
-            };
-        }
+function applyLive(d){
+  const L=d.level||{};
+  const ok=!!(L.sensorOk&&L.valid);
+  const pct=ok?+L.percentFilled:0;
+  $('water-level').style.height=Math.max(0,Math.min(100,pct))+'%';
+  $('percentage').textContent=ok?n(pct,1)+'%':'—';
+  $('remaining').textContent=ok?n(L.percentRemaining,1):'—';
+  setV('height',ok?n(L.waterHeightCm,1):'—','cm');
+  setV('volume',ok?n(L.volumeLiters,1):'—','L');
+  setV('vol-remaining',ok?n(L.volumeRemaining,1):'—','L');
+  setV('distance',(L.distanceCm!=null)?n(L.distanceCm,1):'—','cm');
+  if(L.temperatureC!=null) setV('temperature',n(L.temperatureC,1),'°C');
+  const st=$('tank-state');
+  st.textContent=L.state||(ok?'ok':'error');
+  st.className='pill '+(L.state||'sensor_error');
 
-        function saveCalibration() {
-            if (calibrationWS && calibrationWS.readyState === WebSocket.OPEN) {
-                calibrationWS.send(JSON.stringify({cmd: 'saveCalibration'}));
-            } else {
-                showToast('WebSocket not connected', 'error');
-            }
-        }
+  $('cal-distance').textContent=(L.distanceCm!=null)?n(L.distanceCm,1):'—';
+  $('cal-height').textContent=ok?n(L.waterHeightCm,1):'—';
+  $('cal-percent').textContent=ok?n(L.percentFilled,1):'—';
+  $('cal-valid').textContent=ok?'Yes':'No';
 
-        function resetCalibration() {
-            document.getElementById('offset-slider').value = 0;
-            document.getElementById('offset-value').value = 0;
-            if (calibrationWS && calibrationWS.readyState === WebSocket.OPEN) {
-                calibrationWS.send(JSON.stringify({cmd: 'resetOffset'}));
-            }
-        }
+  $('wifi-status').className='dot'+(d.connection&&d.connection.wifi?' on':'');
+  $('mqtt-status').className='dot'+(d.connection&&d.connection.mqtt?' on':'');
+  if(d.battery&&d.battery.voltage!=null){
+    setV('battery',n(d.battery.voltage,2)+(d.battery.percent!=null?' · '+d.battery.percent+'%':''),'V');
+  }
+  const tag=$('cal-poll-status');
+  tag.textContent='Live';tag.className='tag';
+}
 
-        // Data Loading
-        async function loadStatus() {
-            try {
-                const response = await fetch(API_BASE + '/status');
-                const data = await response.json();
-                document.getElementById('wifi-status').className = 'status-dot' + (data.connection?.wifi ? ' connected' : '');
-                document.getElementById('mqtt-status').className = 'status-dot' + (data.connection?.mqtt ? ' connected' : '');
-                document.getElementById('uptime').textContent = data.uptime || '--';
-            } catch (e) { console.error(e); }
-        }
+async function tick(){
+  if(busy) return;
+  busy=true;
+  try{
+    const ctrl=new AbortController();
+    const t=setTimeout(()=>ctrl.abort(),4000);
+    const r=await fetch(API+'/status',{cache:'no-store',signal:ctrl.signal});
+    clearTimeout(t);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    applyLive(d);
+    lastOk=Date.now();
+    $('poll-age').textContent='ok';
+  }catch(e){
+    const age=lastOk?Math.round((Date.now()-lastOk)/1000)+'s ago':'offline';
+    $('poll-age').textContent=age;
+    const tag=$('cal-poll-status');
+    tag.textContent='Retry';tag.className='tag off';
+  }finally{busy=false;}
+}
 
-        async function loadLevel() {
-            try {
-                const response = await fetch(API_BASE + '/level');
-                const data = await response.json();
-                document.getElementById('water-level').style.height = data.percentFilled + '%';
-                document.getElementById('percentage').textContent = data.percentFilled.toFixed(1) + '%';
-                document.getElementById('remaining').textContent = data.percentRemaining.toFixed(1);
-                document.getElementById('volume').innerHTML = data.volumeLiters.toFixed(1) + '<span class="stat-unit">L</span>';
-                document.getElementById('vol-remaining').innerHTML = data.volumeRemaining.toFixed(1) + '<span class="stat-unit">L</span>';
-                document.getElementById('height').innerHTML = data.waterHeightCm.toFixed(1) + '<span class="stat-unit">cm</span>';
-                document.getElementById('distance').innerHTML = data.distanceCm.toFixed(1) + '<span class="stat-unit">cm</span>';
-                if (data.temperatureC > -100) {
-                    document.getElementById('temperature').innerHTML = data.temperatureC.toFixed(1) + '<span class="stat-unit">°C</span>';
-                }
-                const stateEl = document.getElementById('tank-state');
-                stateEl.textContent = data.state;
-                stateEl.className = 'tank-state ' + data.state;
-            } catch (e) { console.error(e); }
-        }
+async function loadCalibrationOffset(){
+  if(cfgLoaded.sensor) return;
+  try{
+    const d=await(await fetch(API+'/config/sensor',{cache:'no-store'})).json();
+    const o=(d.offsetMm!=null)?d.offsetMm/10:0;
+    $('offset-slider').value=o;$('offset-value').value=o;
+    cfgLoaded.sensor=true;
+  }catch(e){}
+}
 
-        async function loadSectionData(section) {
-            try {
-                const response = await fetch(API_BASE + '/config/' + section);
-                const data = await response.json();
-                switch(section) {
-                    case 'wifi':
-                        document.getElementById('wifi-ssid').value = data.ssid || '';
-                        document.getElementById('wifi-password').value = data.password || '';
-                        document.getElementById('wifi-hostname').value = data.hostname || '';
-                        break;
-                    case 'mqtt':
-                        document.getElementById('mqtt-enabled').checked = data.enabled;
-                        document.getElementById('mqtt-server').value = data.server || '';
-                        document.getElementById('mqtt-port').value = data.port || 1883;
-                        document.getElementById('mqtt-username').value = data.username || '';
-                        document.getElementById('mqtt-password').value = data.password || '';
-                        document.getElementById('mqtt-device-name').value = data.deviceName || '';
-                        document.getElementById('mqtt-topic').value = data.topicPrefix || '';
-                        document.getElementById('mqtt-interval').value = data.publishInterval || 60000;
-                        updateTopicPreview();
-                        break;
-                    case 'tank':
-                        document.getElementById('tank-type').value = data.type || 'circular';
-                        document.getElementById('tank-diameter').value = (data.diameter || 1350) / 10;
-                        document.getElementById('tank-height').value = (data.height || 1704.5) / 10;
-                        document.getElementById('tank-volume').value = data.volumeLiters?.toFixed(1) || 0;
-                        break;
-                    case 'sensor':
-                        document.getElementById('sensor-offset').value = (data.offsetMm || 50) / 10;
-                        document.getElementById('sensor-samples').value = data.samples || 5;
-                        document.getElementById('sensor-interval').value = data.readInterval || 500;
-                        break;
-                    case 'system':
-                        document.getElementById('system-name').value = data.deviceName || '';
-                        document.getElementById('system-timezone').value = data.timezoneOffset || 19800;
-                        document.getElementById('system-debug').checked = data.debugEnabled;
-                        break;
-                    case 'firmware':
-                        break;
-                }
-                if (section === 'firmware') {
-                    try {
-                        const r = await fetch(API_BASE + '/info');
-                        const info = await r.json();
-                        document.getElementById('fw-current').textContent =
-                            (info.firmware || '') + '  build ' + (info.build || '');
-                    } catch (e) { document.getElementById('fw-current').textContent = '?'; }
-                }
-            } catch (e) { console.error(e); }
-        }
+async function saveCalibration(){
+  const o=parseFloat($('offset-value').value)||0;
+  try{
+    const r=await fetch(API+'/config/sensor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({offsetMm:o*10})});
+    const d=await r.json().catch(()=>({}));
+    toast(r.ok&&d.success!==false?'Calibration saved':(d.message||'Save failed'),r.ok?'success':'error');
+    cfgLoaded.sensor=false;
+  }catch(e){toast('Save failed','error');}
+}
+function resetCalibration(){$('offset-slider').value=0;$('offset-value').value=0;}
 
-        async function saveConfig(section) {
-            let data = {};
-            switch(section) {
-                case 'wifi':
-                    data = {
-                        ssid: document.getElementById('wifi-ssid').value,
-                        password: document.getElementById('wifi-password').value,
-                        hostname: document.getElementById('wifi-hostname').value
-                    };
-                    break;
-                case 'mqtt':
-                    data = {
-                        enabled: document.getElementById('mqtt-enabled').checked,
-                        server: document.getElementById('mqtt-server').value,
-                        port: parseInt(document.getElementById('mqtt-port').value),
-                        username: document.getElementById('mqtt-username').value,
-                        password: document.getElementById('mqtt-password').value,
-                        deviceName: document.getElementById('mqtt-device-name').value,
-                        topicPrefix: document.getElementById('mqtt-topic').value,
-                        publishInterval: parseInt(document.getElementById('mqtt-interval').value)
-                    };
-                    break;
-                case 'tank':
-                    data = {
-                        type: document.getElementById('tank-type').value,
-                        diameter: parseFloat(document.getElementById('tank-diameter').value) * 10,
-                        height: parseFloat(document.getElementById('tank-height').value) * 10
-                    };
-                    break;
-                case 'sensor':
-                    data = {
-                        offsetMm: parseFloat(document.getElementById('sensor-offset').value) * 10,
-                        samples: parseInt(document.getElementById('sensor-samples').value),
-                        readInterval: parseInt(document.getElementById('sensor-interval').value)
-                    };
-                    break;
-                case 'system':
-                    data = {
-                        deviceName: document.getElementById('system-name').value,
-                        timezoneOffset: parseInt(document.getElementById('system-timezone').value),
-                        debugEnabled: document.getElementById('system-debug').checked
-                    };
-                    break;
-            }
-            try {
-                const response = await fetch(API_BASE + '/config/' + section, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(data)
-                });
-                const result = await response.json();
-                showToast(result.success ? 'Saved!' : 'Failed: ' + result.message, result.success ? 'success' : 'error');
-            } catch (e) {
-                showToast('Error saving', 'error');
-            }
-        }
+async function loadSectionData(section){
+  if(section==='firmware'){
+    try{const i=await(await fetch(API+'/info',{cache:'no-store'})).json();$('fw-current').textContent=(i.firmware||'')+'  build '+(i.build||'');}
+    catch(e){$('fw-current').textContent='?';}
+    return;
+  }
+  if(cfgLoaded[section]) return;
+  try{
+    const d=await(await fetch(API+'/config/'+section,{cache:'no-store'})).json();
+    if(section==='wifi'){$('wifi-ssid').value=d.ssid||'';$('wifi-password').value=d.password||'';$('wifi-hostname').value=d.hostname||'';}
+    else if(section==='mqtt'){$('mqtt-enabled').checked=!!d.enabled;$('mqtt-server').value=d.server||'';$('mqtt-port').value=d.port||1883;$('mqtt-username').value=d.username||'';$('mqtt-password').value=d.password||'';$('mqtt-device-name').value=d.deviceName||'';$('mqtt-topic').value=d.topicPrefix||'';$('mqtt-interval').value=d.publishInterval||60000;updateTopicPreview();}
+    else if(section==='tank'){$('tank-type').value=d.type||'circular';$('tank-diameter').value=(d.diameter||1434)/10;$('tank-height').value=(d.height||1503)/10;$('tank-volume').value=(d.volumeLiters||0).toFixed(1);}
+    else if(section==='sensor'){$('sensor-offset').value=(d.offsetMm||50)/10;$('sensor-samples').value=d.samples||5;$('sensor-interval').value=d.readInterval||2000;}
+    else if(section==='system'){$('system-name').value=d.deviceName||'';$('system-timezone').value=d.timezoneOffset||19800;$('system-debug').checked=!!d.debugEnabled;}
+    cfgLoaded[section]=true;
+  }catch(e){}
+}
 
-        async function scanWiFi() {
-            const container = document.getElementById('wifi-networks');
-            container.style.display = 'block';
-            container.innerHTML = '<p style="padding:1rem;text-align:center;">Scanning...</p>';
-            try {
-                const response = await fetch(API_BASE + '/wifi/scan');
-                const data = await response.json();
-                if (data.networks.length === 0) {
-                    container.innerHTML = '<p style="padding:1rem;text-align:center;">No networks found</p>';
-                    return;
-                }
-                container.innerHTML = data.networks.map(n => 
-                    `<div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border-color);cursor:pointer;" 
-                          onclick="document.getElementById('wifi-ssid').value='${n.ssid}'">
-                        ${n.ssid} (${n.rssi}dBm) ${n.encryption === 'secured' ? '🔒' : ''}
-                    </div>`
-                ).join('');
-            } catch (e) {
-                container.innerHTML = '<p style="padding:1rem;color:var(--accent-red);">Scan failed</p>';
-            }
-        }
+async function saveConfig(section){
+  let data={};
+  if(section==='wifi')data={ssid:$('wifi-ssid').value,password:$('wifi-password').value,hostname:$('wifi-hostname').value};
+  else if(section==='mqtt')data={enabled:$('mqtt-enabled').checked,server:$('mqtt-server').value,port:+$('mqtt-port').value,username:$('mqtt-username').value,password:$('mqtt-password').value,deviceName:$('mqtt-device-name').value,topicPrefix:$('mqtt-topic').value,publishInterval:+$('mqtt-interval').value};
+  else if(section==='tank')data={type:$('tank-type').value,diameter:+$('tank-diameter').value*10,height:+$('tank-height').value*10};
+  else if(section==='sensor')data={offsetMm:+$('sensor-offset').value*10,samples:+$('sensor-samples').value,readInterval:+$('sensor-interval').value};
+  else if(section==='system')data={deviceName:$('system-name').value,timezoneOffset:+$('system-timezone').value,debugEnabled:$('system-debug').checked};
+  try{
+    const r=await fetch(API+'/config/'+section,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const res=await r.json();
+    toast(res.success?'Saved':'Failed: '+(res.message||''),res.success?'success':'error');
+    cfgLoaded[section]=false;
+  }catch(e){toast('Error saving','error');}
+}
 
-        async function restartDevice() {
-            if (!confirm('Restart device?')) return;
-            await fetch(API_BASE + '/restart', {method: 'POST'});
-            showToast('Restarting...', 'success');
-        }
+async function scanWiFi(){
+  const c=$('wifi-networks');c.style.display='block';c.innerHTML='<p style="padding:12px;text-align:center">Scanning…</p>';
+  try{
+    const d=await(await fetch(API+'/wifi/scan')).json();
+    if(!d.networks||!d.networks.length){c.innerHTML='<p style="padding:12px;text-align:center">No networks</p>';return;}
+    c.innerHTML=d.networks.map(n=>`<div style="padding:12px;border-bottom:1px solid var(--line);cursor:pointer" onclick="document.getElementById('wifi-ssid').value='${String(n.ssid).replace(/'/g,"\\'")}'">${n.ssid} (${n.rssi}dBm)</div>`).join('');
+  }catch(e){c.innerHTML='<p style="padding:12px;color:var(--err)">Scan failed</p>';}
+}
 
-        async function factoryReset() {
-            if (!confirm('Factory reset? All settings will be lost.')) return;
-            if (!confirm('Are you sure?')) return;
-            await fetch(API_BASE + '/reset', {method: 'POST'});
-            showToast('Reset complete', 'success');
-        }
+function uploadFirmware(){
+  const input=$('fw-file'),bar=$('fw-progress'),st=$('fw-status'),btn=$('fw-upload-btn');
+  if(!input.files||!input.files[0]){toast('Select a .bin file','error');return;}
+  btn.disabled=true;bar.style.width='0%';st.textContent='Uploading…';
+  const xhr=new XMLHttpRequest();xhr.open('POST','/api/update');
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)bar.style.width=Math.round(100*e.loaded/e.total)+'%';};
+  xhr.onload=()=>{btn.disabled=false;
+    if(xhr.status===200){st.textContent='Success — rebooting…';toast('Firmware installed','success');bar.style.width='100%';}
+    else{st.textContent=xhr.responseText||'Update failed';toast('Firmware update failed','error');}};
+  xhr.onerror=()=>{btn.disabled=false;st.textContent='Network error';toast('Upload failed','error');};
+  const fd=new FormData();fd.append('firmware',input.files[0],input.files[0].name||'firmware.bin');xhr.send(fd);
+}
 
-        function showToast(message, type = 'info') {
-            const container = document.getElementById('toast-container');
-            const toast = document.createElement('div');
-            toast.className = 'toast ' + type;
-            toast.textContent = message;
-            container.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
-        }
+async function restartDevice(){if(!confirm('Restart device?'))return;await fetch(API+'/restart',{method:'POST'});toast('Restarting…','success');}
+async function factoryReset(){if(!confirm('Factory reset? All settings lost.'))return;if(!confirm('Are you sure?'))return;await fetch(API+'/reset',{method:'POST'});toast('Reset complete','success');}
+function toast(msg,type){const c=$('toast-container'),t=document.createElement('div');t.className='toast '+(type||'');t.textContent=msg;c.appendChild(t);setTimeout(()=>t.remove(),2800);}
+function updateTopicPreview(){const p=$('mqtt-topic').value||'water',n=$('mqtt-device-name').value||'tank1';$('mqtt-topic-preview').textContent=n+'_<chipId>/'+p+'/level';}
+['mqtt-topic','mqtt-device-name'].forEach(id=>$(id).addEventListener('input',updateTopicPreview));
 
-        function updateTopicPreview() {
-            const prefix = document.getElementById('mqtt-topic').value || 'home/water';
-            const devName = document.getElementById('mqtt-device-name').value || 'tank1';
-            const el = document.getElementById('mqtt-topic-preview');
-            if (el) el.textContent = devName + '_<chipId>/' + prefix + '/level';
-        }
-
-        // Live topic preview updates
-        ['mqtt-topic', 'mqtt-device-name'].forEach(id => {
-            document.getElementById(id).addEventListener('input', updateTopicPreview);
-        });
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            loadStatus();
-            loadLevel();
-            connectCalibrationWS();
-            refreshInterval = setInterval(() => {
-                loadStatus();
-                loadLevel();
-            }, 2000);
-        });
-    </script>
+document.addEventListener('DOMContentLoaded',()=>{
+  loadCalibrationOffset();
+  tick();
+  setInterval(tick,2000);
+});
+</script>
 </body>
 </html>

@@ -36,6 +36,14 @@ void WebServerManager::setupRoutes() {
     _server.on("/api/sensor", HTTP_GET, std::bind(&WebServerManager::handleApiSensor, this));
     _server.on("/api/info", HTTP_GET, std::bind(&WebServerManager::handleApiInfo, this));
 
+#ifdef FLM_BATTERY_MONITOR
+    _server.on("/calibrate-battery", HTTP_GET, std::bind(&WebServerManager::handleBatteryCalibratePage, this));
+    _server.on("/api/battery/calibrate", HTTP_GET, std::bind(&WebServerManager::handleApiBatteryCalibrateGet, this));
+    _server.on("/api/battery/calibrate", HTTP_POST, std::bind(&WebServerManager::handleApiBatteryCalibratePost, this));
+    _server.on("/api/config/battery", HTTP_GET, [this]() { handleApiConfigSectionGet(); });
+    _server.on("/api/config/battery", HTTP_POST, [this]() { handleApiConfigSectionPost(); });
+#endif
+
     _server.on("/api/config", HTTP_GET, std::bind(&WebServerManager::handleApiConfigGet, this));
     _server.on("/api/config", HTTP_POST, std::bind(&WebServerManager::handleApiConfigPost, this));
     _server.on("/api/config/wifi", HTTP_GET, [this]() { handleApiConfigSectionGet(); });
@@ -115,6 +123,9 @@ void WebServerManager::handleRoot() {
         html += F("<h1>FluidLevelMonitor</h1>");
         html += F("<p>Upload index.html to LittleFS for full web interface.</p>");
         html += F("<p><a href='/api/status'>API Status</a></p>");
+#ifdef FLM_BATTERY_MONITOR
+        html += F("<p><a href='/calibrate-battery'>Battery A0 Calibration</a></p>");
+#endif
         html += F("</body></html>");
         _server.send(200, "text/html", html);
     }
@@ -165,6 +176,8 @@ String WebServerManager::getContentType(const String& filename) {
 }
 
 void WebServerManager::sendJson(int code, const String& json) {
+    _server.sendHeader("Cache-Control", "no-store");
+    _server.sendHeader("Connection", "close");
     _server.send(code, "application/json", json);
 }
 

@@ -142,7 +142,8 @@ remote_run_install() {
     "Path:     ${FLM_REMOTE_PATH}" \
     "Web UI:   http://${FLM_REMOTE_HOST}/" \
     "API:      http://${FLM_REMOTE_HOST}:${API_PORT:-8080}/api" \
-    "MQTT TLS: ${FLM_REMOTE_HOST}:8883" \
+    "MQTT plain: ${FLM_REMOTE_HOST}:1883  (tls=false)" \
+    "MQTT TLS:   ${FLM_REMOTE_HOST}:8883  (tls=true)" \
     "SSH:      ssh -p ${FLM_REMOTE_PORT} ${FLM_REMOTE_USER}@${FLM_REMOTE_HOST}"
 }
 

@@ -15,8 +15,8 @@
 #define A02YYUW_MIN_DISTANCE     280     ///< mm blind zone (DYP-A02YYUW)
 #define A02YYUW_MAX_DISTANCE     7500    ///< mm
 #define A02YYUW_FRAME_STALE_MS   3000u
-#define DEFAULT_A02YYUW_RX_PIN   5       ///< D1 / GPIO5
-#define DEFAULT_A02YYUW_TX_PIN   4       ///< D2 / GPIO4
+#define DEFAULT_A02YYUW_RX_PIN   14      ///< D5 / GPIO14 (sensor TX -> ESP RX)
+#define DEFAULT_A02YYUW_TX_PIN   12      ///< D6 / GPIO12 (sensor RX <- ESP TX)
 
 enum class A02UartState : uint8_t {
     WaitHeader = 0,

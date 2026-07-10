@@ -398,10 +398,66 @@ mqtt_status() {
   fi
 }
 
+mqtt_verify_plain() {
+  local host="${1:-127.0.0.1}"
+  local port="${2:-1883}"
+  local user="${MQTT_USER_DEVICE:-devAdmin}"
+  local pass="${MQTT_PASS_DEVICE:-123456}"
+  if ! command -v mosquitto_pub >/dev/null 2>&1; then
+    log_warn "mosquitto_pub not installed — skip plain MQTT test"
+    return 0
+  fi
+  if mosquitto_pub -h "$host" -p "$port" -u "$user" -P "$pass" \
+      -t 'testtank/water/level' -m '{"ok":true,"tls":false}' -q 0 >/dev/null 2>&1; then
+    log_ok "Plain MQTT OK (${host}:${port} as ${user})"
+    return 0
+  fi
+  log_fail "Plain MQTT failed on ${host}:${port} (user ${user})"
+  return 1
+}
+
+mqtt_print_device_snippets() {
+  local host="${MQTT_SERVER_CN:-vivasvan-tech.in}"
+  local user="${MQTT_USER_DEVICE:-devAdmin}"
+  local pass="${MQTT_PASS_DEVICE:-123456}"
+  echo ""
+  echo "── ESP8266 config.json (plain MQTT, no TLS) ──"
+  cat <<EOF
+  "mqtt": {
+    "enabled": true,
+    "server": "${host}",
+    "port": 1883,
+    "username": "${user}",
+    "password": "${pass}",
+    "tls": false
+  }
+EOF
+  echo ""
+  echo "── ESP8266 config.json (TLS MQTT) ──"
+  cat <<EOF
+  "mqtt": {
+    "enabled": true,
+    "server": "${host}",
+    "port": 8883,
+    "username": "${user}",
+    "password": "${pass}",
+    "tls": true,
+    "tlsMode": "fingerprint"
+  }
+EOF
+  echo ""
+  log_warn "Cloud firewall (Hostinger/VPS panel) must allow TCP 1883 (plain) and/or 8883 (TLS)."
+  log_warn "ufw alone is not enough — open the same ports in the provider firewall panel."
+}
+
 mqtt_configure() {
-  log_header "Configure MQTT"
+  log_header "Configure MQTT (plain 1883 + TLS 8883)"
   ensure_env_file
 
+  echo "Broker listens on BOTH:"
+  echo "  • Plain MQTT (no TLS) → port 1883  — recommended for ESP8266 when heap is tight"
+  echo "  • TLS MQTT            → port 8883  — encrypted (fingerprint or CA)"
+  echo ""
   echo "Current values (press Enter to keep default):"
   read -r -p "  Hostname [${MQTT_SERVER_CN}]: " v
   [[ -n "$v" ]] && save_env_var MQTT_SERVER_CN "$v"
@@ -422,10 +478,15 @@ mqtt_configure() {
   read -r -p "  Device password [${MQTT_PASS_DEVICE}]: " v
   [[ -n "$v" ]] && save_env_var MQTT_PASS_DEVICE "$v"
 
-  log_step 1 1 "Regenerating certificates and Dynamic Security config"
+  # Reload .env so snippets / verify use new values
+  # shellcheck disable=SC1091
+  set -a; source "$SERVER_ROOT/.env"; set +a
+
+  log_step 1 3 "Regenerating certificates and Dynamic Security config"
   mqtt_ensure_certs_force
   log_ok "Configuration saved to .env"
 
+  log_step 2 3 "Rendering Mosquitto config (plain 1883 + TLS 8883)"
   read -r -p "Restart Mosquitto now? [Y/n] " restart
   if [[ "${restart,,}" != "n" ]]; then
     if [[ "${FLM_DEPLOY_MODE:-standalone}" == "standalone" ]]; then
@@ -437,7 +498,22 @@ mqtt_configure() {
       $COMPOSE -f docker-compose.mqtt.yml restart 2>/dev/null || mqtt_install_docker
       log_ok "Mosquitto container restarted"
     fi
+  else
+    mqtt_render_standalone_conf || true
   fi
+
+  log_step 3 3 "Verifying plain MQTT (no TLS) on localhost:1883"
+  mqtt_verify_plain 127.0.0.1 1883 || true
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | grep -E ':1883 |:8883 ' | sed 's/^/  /' || true
+  fi
+
+  mqtt_print_device_snippets
+  log_summary_box "MQTT Configure Complete" \
+    "Plain MQTT:  ${MQTT_SERVER_CN}:1883  (tls=false)" \
+    "TLS MQTT:    ${MQTT_SERVER_CN}:8883  (tls=true)" \
+    "Device user: ${MQTT_USER_DEVICE:-devAdmin}" \
+    "Open in cloud firewall: 1883 and 8883"
 }
 
 mqtt_uninstall_quiet() {

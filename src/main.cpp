@@ -15,11 +15,12 @@
 #include "network/WiFiManager.h"
 #include "network/MQTTManager.h"
 #include "network/WebServer.h"
-#include "network/CalibrationWS.h"
 #include "utils/Log.h"
 #include "utils/FlmTime.h"
 #include "utils/BatteryMonitor.h"
-#include "relay/RelayManager.h"
+#ifdef FLM_BATTERY_MONITOR
+#include "utils/adc_scaling.h"
+#endif
 
 #if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
 #include "motor/MotorControllerFactory.h"
@@ -30,7 +31,6 @@ ISensor*              activeSensor   = nullptr;
 DHT11Ambient*         ambientSensor  = nullptr;
 TankCalculator*       calculator     = nullptr;
 WebServerManager*     webServer      = nullptr;
-CalibrationWebSocket* calibrationWS  = nullptr;
 
 #if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
 IMotorController*     flmMotor       = nullptr;
@@ -39,30 +39,34 @@ IMotorController*     flmMotor       = nullptr;
 unsigned long lastSensorRead   = 0;
 unsigned long lastMQTTPublish  = 0;
 unsigned long lastStatusPrint  = 0;
+bool          webUiStarted     = false;
+unsigned long bootMillis       = 0;
 
 #define STATUS_PRINT_INTERVAL  10000
+#define FLM_UI_DEFER_TIMEOUT_MS 45000u  ///< Start web UI even if MQTT TLS never connects
 
 void initializeSystem();
 void processLoop();
 void readSensor();
 void publishMQTT();
 void printStatus();
+void startWebUi();
+void maybeStartWebUi();
 void handleWiFiStateChange(WifiMgrState state);
 void handleMQTTMessage(const String& topic, const String& payload);
 
 void fluidPrepareForOTA() {
     MQTTManager::getInstance().prepareForOTA();
-    if (calibrationWS) calibrationWS->stopForOTA();
 }
 
 void fluidRestoreAfterOTA() {
-    if (calibrationWS) calibrationWS->resumeAfterOTA();
     MQTTManager::getInstance().restoreAfterOTA();
 }
 
 void setup() {
     Serial.begin(115200);
     delay(100);
+    bootMillis = millis();
     Version::printInfo();
     initializeSystem();
 }
@@ -75,6 +79,19 @@ void initializeSystem() {
     if (result != ErrorCode::ERR_NONE) {
         Serial.println(F("WARNING: config init had issues"));
     }
+
+#ifdef FLM_BATTERY_MONITOR
+    {
+        const BatteryConfig& battCfg = ConfigManager::getInstance().getBatteryConfig();
+        BatteryMonitor::getInstance().begin(battCfg.cellsInSeries);
+        BatteryMonitor::getInstance().setCalibrationOffset(battCfg.calibrationOffset);
+        Serial.printf("[Main] Battery A0: cells=%u offset=%.3fV scale=%.2f max=%.1fV\n",
+                      (unsigned)battCfg.cellsInSeries,
+                      battCfg.calibrationOffset,
+                      adcBatteryVoltageRatio(),
+                      adcMaxBatteryVoltage());
+    }
+#endif
 
     Serial.println(F("\n>>> Error Handler..."));
     ErrorHandler::getInstance().begin();
@@ -163,19 +180,19 @@ void initializeSystem() {
     }
 #endif
 
-    Serial.println(F("\n>>> Web Server..."));
-#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
-    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA,
-                                     fluidRestoreAfterOTA, flmMotor);
-#else
-    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA,
-                                     fluidRestoreAfterOTA, nullptr);
-#endif
-    if (webServer) webServer->begin();
-
-    Serial.println(F("\n>>> Calibration WebSocket..."));
-    calibrationWS = new CalibrationWebSocket(*activeSensor, *calculator);
-    if (calibrationWS) calibrationWS->begin();
+    // Defer HTTP + Calibration WebSocket until MQTT TLS has connected (or timed out).
+    // Starting them first leaves only ~14 KB free — below the BearSSL handshake budget.
+    {
+        MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
+        const bool deferUi = mqttCfg.enabled && mqttCfg.tls;
+        if (!deferUi) {
+            startWebUi();
+        } else {
+            Serial.println(F("\n>>> Web UI deferred until MQTT TLS connects (saves heap)"));
+            Serial.printf("[Main] Free heap now: %u (maxBlock %u)\n",
+                          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+        }
+    }
 
     WiFiManager::getInstance().setOTAPrepareCallback([]() {
         fluidPrepareForOTA();
@@ -195,15 +212,21 @@ void initializeSystem() {
     Serial.println(F("[Main] WDT fed each loop (~3.2s window on ESP8266)\n"));
 
     if (WiFiManager::getInstance().isConnected()) {
-        Serial.printf("Web:  http://%s/\n", WiFiManager::getInstance().getIP().c_str());
-        Serial.printf("mDNS: http://%s.local/\n",
-                      ConfigManager::getInstance().getWiFiConfig().hostname.c_str());
-        Serial.printf("WS:   ws://%s:81/\n", WiFiManager::getInstance().getIP().c_str());
+        if (webServer) {
+            Serial.printf("Web:  http://%s/\n", WiFiManager::getInstance().getIP().c_str());
+            Serial.printf("mDNS: http://%s.local/\n",
+                          ConfigManager::getInstance().getWiFiConfig().hostname.c_str());
+            Serial.printf("WS:   ws://%s:81/\n", WiFiManager::getInstance().getIP().c_str());
+        } else {
+            Serial.printf("IP:   %s (web UI starting after MQTT)\n",
+                          WiFiManager::getInstance().getIP().c_str());
+        }
     } else if (WiFiManager::getInstance().isAPMode()) {
         Serial.println(F("\n*** ACCESS POINT MODE ***"));
         Serial.printf("SSID: %s\n", WiFiManager::getInstance().getAPSSID().c_str());
         Serial.printf("Pass: %s\n", ConfigManager::getInstance().getWiFiConfig().apPassword.c_str());
         Serial.printf("URL:  http://%s\n", WiFiManager::getInstance().getAPIP().c_str());
+        startWebUi();  // AP mode needs the config UI immediately
     }
     Serial.println(F("\n================================================\n"));
 }
@@ -220,9 +243,9 @@ void processLoop() {
 
     TimeManager::getInstance().loop();
     MQTTManager::getInstance().loop();
+    maybeStartWebUi();
 
     if (webServer) webServer->loop();
-    if (calibrationWS) calibrationWS->loop();
 
     if (activeSensor) activeSensor->poll();
 
@@ -233,7 +256,7 @@ void processLoop() {
     if (flmMotor) flmMotor->loop(motorPct);
 #endif
 
-    if (!calibrationWS || !calibrationWS->isActive()) {
+    {
         uint32_t interval = ConfigManager::getInstance().getSensorConfig().readInterval;
         if (flmElapsedMs(lastSensorRead, interval)) {
             readSensor();
@@ -260,7 +283,7 @@ void processLoop() {
     static bool hasSentFirstReading = false;
     MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
     if (mqttCfg.enabled && MQTTManager::getInstance().isConnected() && hasSentFirstReading) {
-        float bv = BatteryMonitor::readVoltage();
+        float bv = BatteryMonitor::getInstance().readVoltage();
         uint32_t sleepSec = FLM_SLEEP_SECONDS;
         if (bv < BATT_VOLTAGE_CRITICAL) sleepSec = FLM_SLEEP_CRITICAL;
         else if (bv < BATT_VOLTAGE_LOW) sleepSec = FLM_SLEEP_LOW_BATT;
@@ -277,16 +300,25 @@ void processLoop() {
 void readSensor() {
     lastSensorRead = millis();
     WaterLevel level = calculator->calculate();
+
+    // Always log sensor failures — A02YYUW "no_frame"/wiring issues are otherwise silent.
+    static unsigned long lastSensorMsg = 0;
+    if (!level.sensorOk) {
+        if (millis() - lastSensorMsg >= 5000) {
+            lastSensorMsg = millis();
+            Serial.printf("[Main] Sensor FAIL err=%d dist=%.1fcm — check wiring/type/blind-zone\n",
+                          (int)level.error, level.distanceCm);
+            if (activeSensor) {
+                Serial.println(activeSensor->getStatusJson());
+            }
+        }
+        return;
+    }
+
     SystemConfig& cfg = ConfigManager::getInstance().getSystemConfig();
     if (!cfg.debugEnabled) return;
 
-    static unsigned long lastSensorMsg = 0;
-    if (!level.sensorOk) {
-        if (millis() - lastSensorMsg >= 10000) {
-            Serial.println(F("[Main] Sensor not responding — skipping level calculation"));
-            lastSensorMsg = millis();
-        }
-    } else if (level.valid) {
+    if (level.valid) {
         Serial.printf("[Main] %.1f%% filled  Height: %.1f cm  Dist: %.1f cm\n",
                       level.percentFilled, level.waterHeightCm, level.distanceCm);
         if (level.temperatureValid) {
@@ -306,23 +338,30 @@ void publishMQTT() {
     String json = calculator->getMQTTJson(ts);
 
 #ifdef FLM_BATTERY_MONITOR
-    // Inject battery status into MQTT payload
-    JsonDocument doc;
-    deserializeJson(doc, json);
-    JsonDocument battDoc;
-    deserializeJson(battDoc, BatteryMonitor::getJson());
-    doc["battery"] = battDoc;
-    serializeJson(doc, json);
+    // Slim battery fields only — full getJson() diagnostics blow past MQTT buffer.
+    {
+        JsonDocument doc;
+        if (deserializeJson(doc, json) == DeserializationError::Ok) {
+            const float v = BatteryMonitor::getInstance().readVoltageCached(3000);
+            JsonObject batt = doc["battery"].to<JsonObject>();
+            batt["voltage"] = roundf(v * 100.0f) / 100.0f;
+            batt["percent"] = BatteryMonitor::getInstance().getStateOfCharge(v);
+            json = "";
+            serializeJson(doc, json);
+        }
+    }
 #endif
 
     bool ok = MQTTManager::getInstance().publishWaterLevel(json);
 
-    if (ok && ConfigManager::getInstance().getSystemConfig().debugEnabled) {
-        const WaterLevel& last = calculator->getLastLevel();
-        if (last.sensorOk) {
-            Serial.println(F("[Main] MQTT published"));
+    if (ConfigManager::getInstance().getSystemConfig().debugEnabled) {
+        if (ok) {
+            const WaterLevel& last = calculator->getLastLevel();
+            Serial.println(last.sensorOk ? F("[Main] MQTT published")
+                                         : F("[Main] MQTT published (sensor not responding)"));
         } else {
-            Serial.println(F("[Main] MQTT published (sensor not responding)"));
+            Serial.printf("[Main] MQTT publish failed (payload %u bytes)\n",
+                          (unsigned)json.length());
         }
     }
 }
@@ -361,11 +400,44 @@ void printStatus() {
     Serial.printf("Uptime: %s | Heap: %u bytes\n",
                   TimeManager::getInstance().getUptimeString().c_str(),
                   ESP.getFreeHeap());
-
-    if (calibrationWS && calibrationWS->isActive()) {
-        Serial.printf("Calibration: ACTIVE (%d clients)\n", calibrationWS->getClientCount());
-    }
     Serial.println(F("--------------\n"));
+}
+
+void startWebUi() {
+    if (webUiStarted) return;
+    webUiStarted = true;
+
+    Serial.println(F("\n>>> Web Server..."));
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA,
+                                     fluidRestoreAfterOTA, flmMotor);
+#else
+    webServer = new WebServerManager(*activeSensor, *calculator, fluidPrepareForOTA,
+                                     fluidRestoreAfterOTA, nullptr);
+#endif
+    if (webServer) webServer->begin();
+
+    if (WiFiManager::getInstance().isConnected()) {
+        Serial.printf("Web:  http://%s/\n", WiFiManager::getInstance().getIP().c_str());
+    }
+    Serial.printf("[Main] UI up — heap %u maxBlock %u\n",
+                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
+}
+
+void maybeStartWebUi() {
+    if (webUiStarted) return;
+
+    MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
+    const bool mqttDone = !mqttCfg.enabled || !mqttCfg.tls
+                          || MQTTManager::getInstance().isConnected();
+    const bool timedOut = (millis() - bootMillis) >= FLM_UI_DEFER_TIMEOUT_MS;
+
+    if (mqttDone || timedOut) {
+        if (timedOut && !mqttDone) {
+            Serial.println(F("[Main] MQTT TLS still down — starting web UI anyway"));
+        }
+        startWebUi();
+    }
 }
 
 void handleWiFiStateChange(WifiMgrState state) {
@@ -376,6 +448,7 @@ void handleWiFiStateChange(WifiMgrState state) {
         if (MQTTManager::getInstance().isEnabled()) {
             MQTTManager::getInstance().connect();
         }
+        maybeStartWebUi();
     }
 }
 

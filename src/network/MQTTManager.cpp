@@ -70,12 +70,25 @@ ErrorCode MQTTManager::begin() {
 
     buildDeviceTag();
 
+    // Do NOT allocate BearSSL here — WiFiClientSecure + certs eat ~8–15 KB and
+    // leave the heap too fragmented for the later handshake once the web UI starts.
+    // connect() creates the TLS client just-in-time.
     if (config.tls) {
-        if (!setupTls(config)) {
+        if (config.tlsMode == "ca") {
+            if (!LittleFS.exists(MQTT_CA_FILE)) {
+                FLM_LOG_ERROR("MQTT", "tlsMode=ca but %s missing on LittleFS", MQTT_CA_FILE);
+                setState(MQTTState::DISABLED);
+                return ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_INIT, "TLS CA missing");
+            }
+        } else if (config.tlsMode == "fingerprint" && config.fingerprint.length() == 0) {
+            FLM_LOG_ERROR("MQTT", "tlsMode=fingerprint but fingerprint empty");
             setState(MQTTState::DISABLED);
-            return ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_INIT, "TLS setup failed");
+            return ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_INIT, "TLS fingerprint missing");
         }
-        _mqttClient.setClient(*_secureClient);
+        _useTls = true;
+        FLM_LOG_INFO("MQTT", "TLS deferred alloc until connect (mode=%s)", config.tlsMode.c_str());
+    } else {
+        _mqttClient.setClient(_wifiClient);
     }
 
     _mqttClient.setServer(config.server.c_str(), config.port);
@@ -124,25 +137,56 @@ void MQTTManager::buildDeviceTag() {
  *   crypto: reconnects go from seconds to ~100 ms with minimal heap churn.
  * - TLS 1.2 only — drops legacy protocol code paths.
  */
+void MQTTManager::teardownTlsClient() {
+    if (_secureClient) {
+        _secureClient->stop();
+        delete _secureClient;
+        _secureClient = nullptr;
+    }
+    if (_caCerts) {
+        delete _caCerts;
+        _caCerts = nullptr;
+    }
+    // Keep _tlsSession for resume across reconnect rebuilds
+    _useTls = false;
+    _tlsNeedsTime = false;
+}
+
 bool MQTTManager::setupTls(const MQTTConfig& config) {
+    teardownTlsClient();
+
     _secureClient = new BearSSL::WiFiClientSecure();
+    if (!_secureClient) {
+        FLM_LOG_ERROR("MQTT", "TLS client alloc failed (heap %u)", (unsigned)ESP.getFreeHeap());
+        return false;
+    }
+    // 1 KB buffers require broker MFLN (OpenSSL/Mosquitto). Without MFLN the
+    // handshake fails with CONNECT_FAILED; we still use them because default
+    // 16 KB RX buffers will OOM this firmware.
     _secureClient->setBufferSizes(FLM_TLS_RX_BUF, FLM_TLS_TX_BUF);
     _secureClient->setSSLVersion(BR_TLS12, BR_TLS12);
 
-    _tlsSession = new BearSSL::Session();
-    _secureClient->setSession(_tlsSession);
+    if (!_tlsSession) {
+        _tlsSession = new BearSSL::Session();
+    }
+    if (_tlsSession) {
+        _secureClient->setSession(_tlsSession);
+    }
 
+    _tlsNeedsTime = false;
     if (config.tlsMode == "ca") {
         File f = LittleFS.open(MQTT_CA_FILE, "r");
         if (!f) {
             FLM_LOG_ERROR("MQTT", "tlsMode=ca but %s not found on LittleFS", MQTT_CA_FILE);
+            teardownTlsClient();
             return false;
         }
         String pem = f.readString();
         f.close();
         _caCerts = new BearSSL::X509List(pem.c_str());
-        if (_caCerts->getCount() == 0) {
+        if (!_caCerts || _caCerts->getCount() == 0) {
             FLM_LOG_ERROR("MQTT", "no valid certificate in %s", MQTT_CA_FILE);
+            teardownTlsClient();
             return false;
         }
         _secureClient->setTrustAnchors(_caCerts);
@@ -152,6 +196,7 @@ bool MQTTManager::setupTls(const MQTTConfig& config) {
         if (config.fingerprint.length() == 0
             || !_secureClient->setFingerprint(config.fingerprint.c_str())) {
             FLM_LOG_ERROR("MQTT", "invalid TLS fingerprint '%s'", config.fingerprint.c_str());
+            teardownTlsClient();
             return false;
         }
         FLM_LOG_INFO("MQTT", "TLS: fingerprint pinning");
@@ -173,12 +218,27 @@ bool MQTTManager::tlsReady() {
     // A BearSSL handshake needs ~13 KB peak; attempting it with less heap
     // is exactly the OOM → panic → reboot loop. Defer instead of crashing.
     uint32_t freeHeap = ESP.getFreeHeap();
-    if (freeHeap < FLM_TLS_MIN_FREE_HEAP) {
-        FLM_LOG_WARN("MQTT", "TLS deferred: heap %u < %u", freeHeap,
-                     (unsigned)FLM_TLS_MIN_FREE_HEAP);
+    uint32_t maxBlock = ESP.getMaxFreeBlockSize();
+    if (freeHeap < FLM_TLS_MIN_FREE_HEAP || maxBlock < FLM_TLS_MIN_MAX_BLOCK) {
+        FLM_LOG_WARN("MQTT", "TLS deferred: heap %u maxBlock %u (need ≥%u / ≥%u)",
+                     freeHeap, maxBlock,
+                     (unsigned)FLM_TLS_MIN_FREE_HEAP, (unsigned)FLM_TLS_MIN_MAX_BLOCK);
         return false;
     }
     return true;
+}
+
+void MQTTManager::logTlsFailure() {
+    uint32_t heap = ESP.getFreeHeap();
+    uint32_t maxBlock = ESP.getMaxFreeBlockSize();
+    FLM_LOG_ERROR("MQTT", "TLS fail heap=%u maxBlock=%u frag=%u%%",
+                  heap, maxBlock, (unsigned)ESP.getHeapFragmentation());
+    if (_secureClient) {
+        char sslErr[96];
+        int sslCode = _secureClient->getLastSSLError(sslErr, sizeof(sslErr));
+        FLM_LOG_ERROR("MQTT", "BearSSL %d: %s MFLN=%d", sslCode, sslErr,
+                      (int)_secureClient->getMFLNStatus());
+    }
 }
 
 // =============================================================================
@@ -193,18 +253,37 @@ ErrorCode MQTTManager::connect() {
         setState(MQTTState::DISCONNECTED);
         return ErrorCode::ERR_MQTT_CONNECT;
     }
-    if (_useTls && !tlsReady()) {
-        // Re-arm the retry timer so checkConnection() doesn't call us every
-        // loop iteration; keep the current backoff (this is not a failure).
-        _lastConnectAttempt = millis();
-        return ErrorCode::ERR_MQTT_CONNECT;
-    }
 
     MQTTConfig& config = ConfigManager::getInstance().getMQTTConfig();
 
-    FLM_LOG_INFO("MQTT", "connecting %s:%u%s heap=%u", config.server.c_str(),
-                 (unsigned)config.port, _useTls ? " TLS" : "",
-                 (unsigned)ESP.getFreeHeap());
+    if (config.tls) {
+        // CA mode needs NTP; fingerprint/insecure do not
+        if (config.tlsMode == "ca" && !TimeManager::getInstance().isSynchronized()) {
+            FLM_LOG_DEBUG("MQTT", "TLS waiting for NTP sync");
+            _lastConnectAttempt = millis();
+            return ErrorCode::ERR_MQTT_CONNECT;
+        }
+        uint32_t freeHeap = ESP.getFreeHeap();
+        uint32_t maxBlock = ESP.getMaxFreeBlockSize();
+        if (freeHeap < FLM_TLS_MIN_FREE_HEAP || maxBlock < FLM_TLS_MIN_MAX_BLOCK) {
+            FLM_LOG_WARN("MQTT", "TLS deferred: heap %u maxBlock %u (need ≥%u / ≥%u)",
+                         freeHeap, maxBlock,
+                         (unsigned)FLM_TLS_MIN_FREE_HEAP, (unsigned)FLM_TLS_MIN_MAX_BLOCK);
+            _lastConnectAttempt = millis();
+            return ErrorCode::ERR_MQTT_CONNECT;
+        }
+        // Rebuild client each attempt — failed handshakes fragment heap
+        if (!setupTls(config)) {
+            setState(MQTTState::DISCONNECTED);
+            return ErrorCode::ERR_MQTT_CONNECT;
+        }
+        _mqttClient.setClient(*_secureClient);
+        _mqttClient.setServer(config.server.c_str(), config.port);
+    }
+
+    FLM_LOG_INFO("MQTT", "connecting %s:%u%s heap=%u maxBlock=%u", config.server.c_str(),
+                 (unsigned)config.port, config.tls ? " TLS" : "",
+                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxFreeBlockSize());
     setState(MQTTState::CONNECTING);
     _lastConnectAttempt = millis();
 
@@ -232,7 +311,9 @@ ErrorCode MQTTManager::connect() {
     if (connected) {
         setState(MQTTState::CONNECTED);
         _reconnectDelayMs = MQTT_RECONNECT_INTERVAL;
-        FLM_LOG_INFO("MQTT", "connected");
+        FLM_LOG_INFO("MQTT", "connected%s",
+                     (config.tls && _secureClient && _secureClient->getMFLNStatus())
+                         ? " (MFLN ok)" : "");
         publishStatus();
         subscribe("command");
 #if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
@@ -247,13 +328,9 @@ ErrorCode MQTTManager::connect() {
     if (next > MQTT_RECONNECT_MAX_MS) next = MQTT_RECONNECT_MAX_MS;
     _reconnectDelayMs = next;
 
-    if (_useTls && _secureClient) {
-        char sslErr[80];
-        int sslCode = _secureClient->getLastSSLError(sslErr, sizeof(sslErr));
-        if (sslCode != 0) {
-            FLM_LOG_ERROR("MQTT", "TLS error %d: %s (heap %u)", sslCode, sslErr,
-                          (unsigned)ESP.getFreeHeap());
-        }
+    if (config.tls) {
+        logTlsFailure();
+        teardownTlsClient();  // reclaim RAM so deferred retries can succeed
     }
 
     int st = _mqttClient.state();
@@ -350,12 +427,23 @@ bool MQTTManager::publish(const String& subtopic, const String& payload, bool re
     }
 
     String fullTopic = getTopic(subtopic);
+    // PubSubClient needs topic + payload + MQTT header inside MQTT_BUFFER_SIZE.
+    const size_t need = fullTopic.length() + payload.length() + 8;
+    if (need > MQTT_BUFFER_SIZE) {
+        _publishErrors++;
+        FLM_LOG_WARN("MQTT", "payload too large topic=%u payload=%u need=%u buf=%u",
+                     (unsigned)fullTopic.length(), (unsigned)payload.length(),
+                     (unsigned)need, (unsigned)MQTT_BUFFER_SIZE);
+        ErrorHandler::getInstance().logError(ErrorCode::ERR_MQTT_PUBLISH, fullTopic);
+        return false;
+    }
+
     bool success = _mqttClient.publish(fullTopic.c_str(), payload.c_str(), retained);
 
     if (success) {
         _publishCount++;
         if (ConfigManager::getInstance().getSystemConfig().debugEnabled) {
-            FLM_LOG_DEBUG("MQTT", "pub %s", fullTopic.c_str());
+            FLM_LOG_DEBUG("MQTT", "pub %s (%u B)", fullTopic.c_str(), (unsigned)payload.length());
         }
     } else {
         _publishErrors++;

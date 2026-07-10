@@ -68,10 +68,10 @@ String SensorFactory::normalizeType(const String& typeStr) {
 // =============================================================================
 
 void SensorFactory::getDefaultPins(const String& typeStr, SensorHWConfig& config) {
-    config.rxPin = 5;           // D1 / GPIO5
-    config.txPin = 4;           // D2 / GPIO4
-    config.trigPin = 5;         // D1 / GPIO5
-    config.echoPin = 4;         // D2 / GPIO4
+    config.rxPin = 14;          // D5 / GPIO14 (sensor TX -> ESP RX)
+    config.txPin = 12;          // D6 / GPIO12 (sensor RX <- ESP TX)
+    config.trigPin = 14;        // D5 / GPIO14
+    config.echoPin = 12;        // D6 / GPIO12
     config.signalPin = 14;      // D5 / GPIO14
     config.mountHeightMm = 500.0f;
     config.tankHeightMm = 1704.5f;

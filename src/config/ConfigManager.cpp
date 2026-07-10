@@ -115,6 +115,7 @@ void ConfigManager::resetToDefaults() {
     setDefaultTankConfig();
     setDefaultSensorConfig();
     setDefaultSystemConfig();
+    setDefaultBatteryConfig();
     setDefaultMotorConfig();
     
     FLM_LOG_INFO("Cfg", "reset to defaults");
@@ -195,6 +196,12 @@ void ConfigManager::setDefaultSystemConfig() {
     _systemConfig.ntpServer = DEFAULT_NTP_SERVER;
     _systemConfig.webPort = DEFAULT_WEB_PORT;
     _systemConfig.debugEnabled = DEFAULT_DEBUG_ENABLED;
+}
+
+void ConfigManager::setDefaultBatteryConfig() {
+    _batteryConfig.calibrationOffset = DEFAULT_BATTERY_CAL_OFFSET;
+    _batteryConfig.cellsInSeries = DEFAULT_BATTERY_CELLS;
+    _batteryConfig.autoCalibration = DEFAULT_BATTERY_AUTO_CAL;
 }
 
 void ConfigManager::setDefaultMotorConfig() {
@@ -283,6 +290,9 @@ ErrorCode ConfigManager::loadConfig() {
     if (doc["system"].is<JsonObject>()) {
         parseSystemConfig(doc["system"]);
     }
+    if (doc["battery"].is<JsonObject>()) {
+        parseBatteryConfig(doc["battery"]);
+    }
     if (doc["relay"].is<JsonObject>()) {
         parseMotorConfig(doc["relay"]);
     }
@@ -339,6 +349,8 @@ ErrorCode ConfigManager::saveConfigAtomic() {
     serializeSensorConfig(jo);
     jo = doc["system"].to<JsonObject>();
     serializeSystemConfig(jo);
+    jo = doc["battery"].to<JsonObject>();
+    serializeBatteryConfig(jo);
     jo = doc["relay"].to<JsonObject>();
     serializeMotorConfig(jo);
 
@@ -629,6 +641,15 @@ void ConfigManager::parseSystemConfig(const JsonObject& obj) {
     _systemConfig.debugEnabled = obj["debugEnabled"] | DEFAULT_DEBUG_ENABLED;
 }
 
+void ConfigManager::parseBatteryConfig(const JsonObject& obj) {
+    _batteryConfig.calibrationOffset = obj["calibrationOffset"] | DEFAULT_BATTERY_CAL_OFFSET;
+    _batteryConfig.cellsInSeries = obj["cellsInSeries"] | DEFAULT_BATTERY_CELLS;
+    if (_batteryConfig.cellsInSeries == 0) {
+        _batteryConfig.cellsInSeries = DEFAULT_BATTERY_CELLS;
+    }
+    _batteryConfig.autoCalibration = obj["autoCalibration"] | DEFAULT_BATTERY_AUTO_CAL;
+}
+
 void ConfigManager::parseMotorConfig(const JsonObject& obj) {
     _motorConfig.enabled = obj["enabled"] | DEFAULT_RELAY_ENABLED;
     _motorConfig.pin = obj["pin"] | DEFAULT_RELAY_PIN;
@@ -738,6 +759,12 @@ void ConfigManager::serializeSystemConfig(JsonObject& obj) const {
     obj["debugEnabled"] = _systemConfig.debugEnabled;
 }
 
+void ConfigManager::serializeBatteryConfig(JsonObject& obj) const {
+    obj["calibrationOffset"] = _batteryConfig.calibrationOffset;
+    obj["cellsInSeries"] = _batteryConfig.cellsInSeries;
+    obj["autoCalibration"] = _batteryConfig.autoCalibration;
+}
+
 void ConfigManager::serializeMotorConfig(JsonObject& obj) const {
     obj["enabled"] = _motorConfig.enabled;
     obj["pin"] = _motorConfig.pin;
@@ -780,6 +807,9 @@ String ConfigManager::getConfigJson() const {
     
     JsonObject systemObj = doc["system"].to<JsonObject>();
     serializeSystemConfig(systemObj);
+
+    JsonObject batteryObj = doc["battery"].to<JsonObject>();
+    serializeBatteryConfig(batteryObj);
     
     JsonObject relayObj = doc["relay"].to<JsonObject>();
     serializeMotorConfig(relayObj);
@@ -821,6 +851,9 @@ ErrorCode ConfigManager::setConfigFromJson(const String& json) {
     if (doc["system"].is<JsonObject>()) {
         parseSystemConfig(doc["system"]);
     }
+    if (doc["battery"].is<JsonObject>()) {
+        parseBatteryConfig(doc["battery"]);
+    }
     if (doc["relay"].is<JsonObject>()) {
         parseMotorConfig(doc["relay"]);
     }
@@ -855,6 +888,8 @@ ErrorCode ConfigManager::updateSection(const String& section, const String& json
         parseSensorConfig(doc.as<JsonObject>());
     } else if (section == "system") {
         parseSystemConfig(doc.as<JsonObject>());
+    } else if (section == "battery") {
+        parseBatteryConfig(doc.as<JsonObject>());
     } else if (section == "relay") {
         parseMotorConfig(doc.as<JsonObject>());
     } else {
@@ -887,6 +922,9 @@ String ConfigManager::getSectionJson(const String& section) const {
     } else if (section == "system") {
         JsonObject obj = doc.to<JsonObject>();
         serializeSystemConfig(obj);
+    } else if (section == "battery") {
+        JsonObject obj = doc.to<JsonObject>();
+        serializeBatteryConfig(obj);
     } else if (section == "relay") {
         JsonObject obj = doc.to<JsonObject>();
         serializeMotorConfig(obj);

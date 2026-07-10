@@ -350,7 +350,7 @@ menu_configure() {
   while true; do
     show_banner
     echo -e "${C_BOLD}Configure${C_RESET}"
-    echo "  1) Configure MQTT (hostname, IP, device credentials)"
+    echo "  1) Configure MQTT (plain 1883 + TLS 8883, hostname, credentials)"
     echo "  2) Configure Database"
     echo "  3) Configure Backend"
     echo "  4) Configure Frontend"
@@ -419,7 +419,7 @@ main_menu() {
     echo "  2) Uninstall"
     echo "  3) Configure"
     echo "  4) Status (what is running?)"
-    echo "  5) Verify MQTT TLS (ESP8266 check)"
+    echo "  5) Verify MQTT (plain 1883 + TLS 8883)"
     echo "  6) Regenerate MQTT certificates"
     echo "  7) View logs"
     echo "  8) Install system dependencies only"
@@ -432,7 +432,12 @@ main_menu() {
       2) menu_uninstall ;;
       3) menu_configure ;;
       4) show_status ;;
-      5) bash "$SCRIPTS_DIR/verify-mqtt-tls.sh"; pause_enter ;;
+      5)
+        bash "$SCRIPTS_DIR/verify-mqtt-plain.sh" || true
+        echo ""
+        bash "$SCRIPTS_DIR/verify-mqtt-tls.sh" || true
+        pause_enter
+        ;;
       6) mqtt_regenerate_certs; pause_enter ;;
       7) view_logs ;;
       8)

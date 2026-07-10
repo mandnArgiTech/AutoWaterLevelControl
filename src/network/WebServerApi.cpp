@@ -9,50 +9,56 @@
 #include "../utils/TimeManager.h"
 #include "../version.h"
 #include <LittleFS.h>
+#ifdef FLM_BATTERY_MONITOR
+#include "../utils/BatteryMonitor.h"
+#endif
 
 void WebServerManager::handleApiStatus() {
     _requestCount++;
     addCorsHeaders();
 
+    // Compact dashboard payload — use cached sensor level only (main loop updates it).
     JsonDocument doc;
     doc["device"] = ConfigManager::getInstance().getSystemConfig().deviceName;
     doc["firmware"] = Version::getFirmware();
     doc["uptime"] = TimeManager::getInstance().getUptimeString();
     doc["freeHeap"] = ESP.getFreeHeap();
-    doc["heapFragmentation"] = ESP.getHeapFragmentation();
-    doc["maxFreeBlock"] = ESP.getMaxFreeBlockSize();
-    doc["timestamp"] = TimeManager::getInstance().getISO8601();
 
     const WaterLevel& level = _calculator.getLastLevel();
     doc["sensorOk"] = level.sensorOk;
-    doc["sensorType"] = _sensor.getSensorTypeName();
 
     JsonObject levelObj = doc["level"].to<JsonObject>();
     levelObj["valid"] = level.valid;
     levelObj["sensorOk"] = level.sensorOk;
-    if (level.sensorOk && level.valid) {
-        levelObj["percentFilled"] = level.percentFilled;
-        levelObj["percentRemaining"] = level.percentRemaining;
-        levelObj["waterHeightCm"] = level.waterHeightCm;
-        levelObj["volumeLiters"] = level.volumeLiters;
-        levelObj["volumeRemaining"] = level.volumeRemaining;
-        levelObj["state"] = TankCalculator::tankStateToString(_calculator.getTankState());
-        if (level.temperatureValid) {
-            levelObj["temperatureC"] = level.temperatureC;
-        }
-        if (level.humidityValid) {
-            levelObj["humidityPct"] = level.humidityPct;
-        }
-    } else {
-        levelObj["state"] = "sensor_error";
-        levelObj["errorCode"] = static_cast<uint16_t>(level.error);
-        levelObj["errorDescription"] = ErrorHandler::getInstance().getErrorDescription(level.error);
+    levelObj["percentFilled"] = roundf(level.percentFilled * 10.0f) / 10.0f;
+    levelObj["percentRemaining"] = roundf(level.percentRemaining * 10.0f) / 10.0f;
+    levelObj["waterHeightCm"] = roundf(level.waterHeightCm * 10.0f) / 10.0f;
+    levelObj["volumeLiters"] = roundf(level.volumeLiters * 10.0f) / 10.0f;
+    levelObj["volumeRemaining"] = roundf(level.volumeRemaining * 10.0f) / 10.0f;
+    levelObj["distanceCm"] = roundf(level.distanceCm * 10.0f) / 10.0f;
+    levelObj["state"] = level.sensorOk && level.valid
+        ? TankCalculator::tankStateToString(_calculator.getTankState())
+        : "sensor_error";
+    if (level.temperatureValid) {
+        levelObj["temperatureC"] = roundf(level.temperatureC * 10.0f) / 10.0f;
+    }
+    if (level.humidityValid) {
+        levelObj["humidityPct"] = roundf(level.humidityPct * 10.0f) / 10.0f;
     }
 
     JsonObject connection = doc["connection"].to<JsonObject>();
     connection["wifi"] = WiFiManager::getInstance().isConnected();
     connection["mqtt"] = MQTTManager::getInstance().isConnected();
-    connection["ip"] = WiFiManager::getInstance().getIP();
+
+#ifdef FLM_BATTERY_MONITOR
+    {
+        // Cached battery snapshot — avoid 8× ADC + delay(2) on every poll.
+        const float v = BatteryMonitor::getInstance().readVoltageCached(3000);
+        JsonObject batt = doc["battery"].to<JsonObject>();
+        batt["voltage"] = roundf(v * 100.0f) / 100.0f;
+        batt["percent"] = BatteryMonitor::getInstance().getStateOfCharge(v);
+    }
+#endif
 
     String output;
     serializeJson(doc, output);
@@ -62,7 +68,7 @@ void WebServerManager::handleApiStatus() {
 void WebServerManager::handleApiLevel() {
     _requestCount++;
     addCorsHeaders();
-    _calculator.calculate();
+    // Never recalculate here — that re-runs filters and stalls WiFi under poll load.
     sendJson(200, _calculator.getWaterLevelJson());
 }
 
@@ -335,3 +341,93 @@ void WebServerManager::handleApiPumpPost() {
     _motor->setMode(IMotorController::modeFromString(state));
     sendSuccess("Pump mode set to " + state);
 }
+
+#ifdef FLM_BATTERY_MONITOR
+#include "BatteryCalibratePage.h"
+#include "../utils/BatteryMonitor.h"
+#include "../utils/adc_scaling.h"
+
+void WebServerManager::handleBatteryCalibratePage() {
+    _requestCount++;
+    _server.send_P(200, "text/html", WEB_PAGE_BATTERY_CALIBRATE);
+}
+
+void WebServerManager::handleApiBatteryCalibrateGet() {
+    _requestCount++;
+    addCorsHeaders();
+    auto& batt = BatteryMonitor::getInstance();
+    int raw = batt.readAnalogRawAveraged(16);
+    float measured = batt.readBatteryVoltage(raw);
+    JsonDocument doc;
+    doc["ok"] = true;
+    doc["source"] = "a0";
+    doc["source_label"] = "ESP8266 A0";
+    doc["raw"] = raw;
+    doc["measured"] = measured;
+    doc["offset"] = batt.getCalibrationOffset();
+    doc["a0PinV"] = adcRawToA0PinVoltage(raw);
+    doc["cells"] = ConfigManager::getInstance().getBatteryConfig().cellsInSeries;
+    doc["scale"] = adcBatteryVoltageRatio();
+    doc["maxMeasurableV"] = adcMaxBatteryVoltage();
+    String out;
+    serializeJson(doc, out);
+    sendJson(200, out);
+}
+
+void WebServerManager::handleApiBatteryCalibratePost() {
+    _requestCount++;
+    addCorsHeaders();
+    if (!_server.hasArg("plain")) {
+        sendApiFailure(400, "NO_BODY", "No body provided");
+        return;
+    }
+    JsonDocument req;
+    if (deserializeJson(req, _server.arg("plain"))) {
+        sendApiFailure(400, "PARSE_ERROR", "Invalid JSON");
+        return;
+    }
+
+    auto& batt = BatteryMonitor::getInstance();
+    bool reset = req["reset"] | false;
+
+    if (reset) {
+        batt.setCalibrationOffset(0.0f);
+    } else {
+        float actual = req["actual"] | 0.0f;
+        if (!(actual > 0.0f)) {
+            sendApiFailure(400, "INVALID_ACTUAL", "invalid actual voltage");
+            return;
+        }
+        // Match proven flow: clear offset, average 16 samples, then calibrate
+        batt.setCalibrationOffset(0.0f);
+        int raw = batt.readAnalogRawAveraged(16);
+        float measured = batt.readBatteryVoltage(raw);
+        batt.calibrate(actual, measured);
+    }
+
+    BatteryConfig& cfg = ConfigManager::getInstance().getBatteryConfig();
+    cfg.calibrationOffset = batt.getCalibrationOffset();
+    cfg.autoCalibration = !reset;
+    ErrorCode saveRc = ConfigManager::getInstance().saveConfig();
+    if (saveRc != ErrorCode::ERR_NONE) {
+        sendApiFailure(503, "CONFIG_LOCKED", "Could not save calibration");
+        return;
+    }
+
+    JsonDocument resp;
+    resp["ok"] = true;
+    resp["offset"] = batt.getCalibrationOffset();
+    if (!reset) {
+        resp["actual"] = req["actual"];
+        // Re-read with new offset for response measured field (pre-cal measured)
+        batt.setCalibrationOffset(0.0f);
+        float measured = batt.readBatteryVoltage(batt.readAnalogRawAveraged(16));
+        batt.setCalibrationOffset(cfg.calibrationOffset);
+        resp["measured"] = measured;
+    }
+    String out;
+    serializeJson(resp, out);
+    sendJson(200, out);
+}
+#endif
+
