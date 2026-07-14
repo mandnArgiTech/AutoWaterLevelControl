@@ -68,12 +68,16 @@ remote_rsync() {
   fi
   export SSHPASS="${FLM_REMOTE_PASSWORD:-}"
   # shellcheck disable=SC2086
+  # Never sync/delete runtime data. Local checkout has no postgres/ tree, so
+  # --delete without these excludes wipes the live VPS cluster (and MQTT state).
   rsync -az --delete --human-readable \
     -e "$ssh_wrapper" \
     --exclude '.env' \
     --exclude 'config/remote.env' \
     --exclude 'logs/' \
     --exclude '.run/' \
+    --exclude 'run/' \
+    --exclude 'postgres/' \
     --exclude 'frontend/node_modules/' \
     --exclude 'frontend/dist/' \
     --exclude 'frontend/tsconfig.tsbuildinfo' \
@@ -82,11 +86,13 @@ remote_rsync() {
     --exclude 'backend/flm-domain/target/' \
     --exclude 'backend/flm-security/target/' \
     --exclude 'backend/flm-mqtt-bridge/target/' \
+    --exclude 'backend/flm-platform-admin/target/' \
     --exclude 'mosquitto/certs/*' \
     --exclude 'mosquitto/passwd/passwd' \
     --exclude 'mosquitto/data/' \
     --exclude 'mosquitto/log/' \
     --exclude 'mosquitto/openssl/server.cnf' \
+    --exclude 'mosquitto/config/dynamic-security.json' \
     --exclude 'nginx/flm-standalone.conf' \
     "$SERVER_ROOT/" "${FLM_REMOTE_USER}@${FLM_REMOTE_HOST}:${FLM_REMOTE_PATH}/"
 }

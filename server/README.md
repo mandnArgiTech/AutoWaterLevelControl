@@ -309,6 +309,8 @@ Use **`remote-update`** when you fixed backend or frontend code — **much faste
 
 **Database safety:** `remote-update` / `update` never run `initdb` and never delete `postgres/data`. If Postgres is down, the update only **starts the existing cluster**. First-time DB creation requires `FLM_ALLOW_DB_INIT=1` (set automatically by full `install` / `remote-install`). Intentional wipe of a non-empty data dir additionally needs `FLM_ALLOW_DB_WIPE=1`.
 
+**Rsync safety:** Remote sync uses `--delete` but **excludes** `postgres/`, `logs/`, `run/`, MQTT runtime state, and `.env`, so a local checkout without those dirs cannot wipe VPS data.
+
 **What `remote-update` does:**
 
 1. `rsync` your local `server/` → `/opt/flm` on VPS (keeps remote `.env`, MQTT certs, database)
