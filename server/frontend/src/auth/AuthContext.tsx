@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, setAccessToken } from '../api/client';
 import type { LoginResponse } from '../api/types';
 
@@ -18,6 +18,12 @@ function persistUser(u: LoginResponse) {
   localStorage.setItem('flm_user', JSON.stringify(u));
 }
 
+function clearPersistedSession() {
+  setAccessToken(null);
+  localStorage.removeItem('flm_user');
+  localStorage.removeItem('flm_token');
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<LoginResponse | null>(() => {
     const raw = localStorage.getItem('flm_user');
@@ -25,6 +31,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) setAccessToken(token);
     return raw ? JSON.parse(raw) : null;
   });
+
+  // Re-validate stored session so a wiped/reseeded server cannot show ghost localStorage data
+  useEffect(() => {
+    const token = localStorage.getItem('flm_token');
+    if (!token) return;
+    let cancelled = false;
+    api.me()
+      .then((fresh) => {
+        if (cancelled) return;
+        const merged = { ...fresh, token: fresh.token || token };
+        persistUser(merged);
+        setUser(merged);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        clearPersistedSession();
+        setUser(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const value = useMemo<AuthState>(
     () => ({
@@ -40,8 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       logout: () => {
         api.logout().catch(() => {});
-        setAccessToken(null);
-        localStorage.removeItem('flm_user');
+        clearPersistedSession();
         setUser(null);
       },
     }),

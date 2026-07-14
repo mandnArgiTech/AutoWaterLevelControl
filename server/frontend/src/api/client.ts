@@ -55,6 +55,7 @@ async function refreshSession(): Promise<LoginResponse> {
 async function request<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    cache: 'no-store',
     credentials: 'include',
     headers: authHeaders(init?.headers as HeadersInit),
   });
