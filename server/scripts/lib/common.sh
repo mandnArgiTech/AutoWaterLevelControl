@@ -163,6 +163,24 @@ is_postgres_standalone_running() {
       return 0
     fi
   fi
+  # Fallback: FLM cluster exists and port accepts connections (stale/missing pidfile)
+  if [[ -f "$pgdata/PG_VERSION" ]]; then
+    local pg_isready_bin="" d
+    if command -v pg_isready >/dev/null 2>&1; then
+      pg_isready_bin="$(command -v pg_isready)"
+    else
+      for d in /usr/lib/postgresql/*/bin; do
+        if [[ -x "$d/pg_isready" ]]; then
+          pg_isready_bin="$d/pg_isready"
+          break
+        fi
+      done
+    fi
+    if [[ -n "$pg_isready_bin" ]] && \
+       "$pg_isready_bin" -h localhost -p "${POSTGRES_PORT:-5432}" -q 2>/dev/null; then
+      return 0
+    fi
+  fi
   return 1
 }
 

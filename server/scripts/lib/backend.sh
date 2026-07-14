@@ -59,9 +59,21 @@ backend_install_standalone() {
   ensure_maven || return 1
   ensure_env_file
 
+  # shellcheck source=postgres.sh
+  source "$SCRIPTS_DIR/lib/postgres.sh"
   if ! is_postgres_running; then
-    source "$SCRIPTS_DIR/lib/postgres.sh"
-    postgres_install || return 1
+    if [[ -f "${PG_DATA_DIR:-$SERVER_ROOT/postgres/data}/PG_VERSION" ]]; then
+      log_info "Starting existing PostgreSQL cluster (no re-init)"
+      postgres_start || return 1
+      postgres_ensure_database || return 1
+    elif [[ "${FLM_ALLOW_DB_INIT:-}" == "1" ]]; then
+      postgres_install || return 1
+    else
+      log_fail "PostgreSQL is down and no cluster exists at ${PG_DATA_DIR:-$SERVER_ROOT/postgres/data}"
+      log_fail "For first-time install use: FLM_ALLOW_DB_INIT=1 ./flm-server.sh install"
+      log_fail "Updates must never wipe the DB — refusing automatic initdb"
+      return 1
+    fi
   fi
   if ! is_mqtt_running; then
     source "$SCRIPTS_DIR/lib/mqtt.sh"

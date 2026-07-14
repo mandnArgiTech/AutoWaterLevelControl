@@ -39,6 +39,9 @@ export interface DeviceSummary {
   latestPercentFilled?: number;
   latestVolumeLiters?: number;
   latestReadingAt?: string;
+  /** Device system uptime, e.g. "2d 5h 30m 15s" */
+  uptime?: string;
+  uptimeMs?: number;
 }
 
 export interface ReadingPoint {

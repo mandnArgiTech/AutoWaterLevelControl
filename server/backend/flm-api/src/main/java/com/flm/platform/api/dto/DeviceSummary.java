@@ -11,5 +11,8 @@ public record DeviceSummary(
     Instant lastSeenAt,
     Double latestPercentFilled,
     Double latestVolumeLiters,
-    Instant latestReadingAt
+    Instant latestReadingAt,
+    /** Human-readable device uptime, e.g. "2d 5h 30m". */
+    String uptime,
+    Long uptimeMs
 ) {}

@@ -73,6 +73,10 @@ function DeviceMonitorCard({
             </span>
           </div>
           <div>
+            <span className="mini-label">System uptime</span>
+            <span className="mini-value">{device.uptime || '—'}</span>
+          </div>
+          <div>
             <span className="mini-label">Last update</span>
             <span className="mini-value">
               {device.latestReadingAt

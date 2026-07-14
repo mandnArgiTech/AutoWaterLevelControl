@@ -31,6 +31,9 @@ public class Device {
 
     private Instant lastSeenAt;
 
+    /** Last reported ESP8266 uptime from MQTT status/level (milliseconds). */
+    private Long uptimeMs;
+
     @Column(nullable = false, updatable = false)
     private Instant registeredAt = Instant.now();
 
@@ -49,5 +52,7 @@ public class Device {
     public void setOnline(boolean online) { this.online = online; }
     public Instant getLastSeenAt() { return lastSeenAt; }
     public void setLastSeenAt(Instant lastSeenAt) { this.lastSeenAt = lastSeenAt; }
+    public Long getUptimeMs() { return uptimeMs; }
+    public void setUptimeMs(Long uptimeMs) { this.uptimeMs = uptimeMs; }
     public Instant getRegisteredAt() { return registeredAt; }
 }

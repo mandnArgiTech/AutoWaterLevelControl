@@ -106,6 +106,8 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
       <div class="stat"><div class="k">Distance</div><div class="v" id="distance">—<span class="u">cm</span></div></div>
       <div class="stat"><div class="k">Temperature</div><div class="v" id="temperature">—<span class="u">&deg;C</span></div></div>
       <div class="stat"><div class="k">Battery</div><div class="v" id="battery">—<span class="u">V</span></div></div>
+      <div class="stat"><div class="k">Uptime</div><div class="v" id="uptime">—</div></div>
+      <div class="stat"><div class="k">Heap</div><div class="v" id="heap">—<span class="u">B</span></div></div>
     </div>
   </section>
 
@@ -270,6 +272,8 @@ function applyLive(d){
   if(d.battery&&d.battery.voltage!=null){
     setV('battery',n(d.battery.voltage,2)+(d.battery.percent!=null?' · '+d.battery.percent+'%':''),'V');
   }
+  $('uptime').textContent=d.uptime||'—';
+  if(d.freeHeap!=null) setV('heap',String(d.freeHeap),'B');
   const tag=$('cal-poll-status');
   tag.textContent='Live';tag.className='tag';
 }

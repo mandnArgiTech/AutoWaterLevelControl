@@ -105,6 +105,7 @@ public class DeviceService {
 
     private DeviceSummary toSummary(Device d) {
         LevelReading latest = readingRepository.findFirstByDeviceIdOrderByReceivedAtDesc(d.getId());
+        Long uptimeMs = d.getUptimeMs();
         return new DeviceSummary(
             d.getId(),
             d.getDeviceTag(),
@@ -113,7 +114,25 @@ public class DeviceService {
             d.getLastSeenAt(),
             latest != null ? latest.getPercentFilled() : null,
             latest != null ? latest.getVolumeLiters() : null,
-            latest != null ? latest.getReceivedAt() : null
+            latest != null ? latest.getReceivedAt() : null,
+            formatUptime(uptimeMs),
+            uptimeMs
         );
+    }
+
+    /** Format millis the same way as ESP TimeManager::getUptimeString(). */
+    static String formatUptime(Long uptimeMs) {
+        if (uptimeMs == null || uptimeMs < 0) return null;
+        long totalSec = uptimeMs / 1000L;
+        long days = totalSec / 86400L;
+        long hours = (totalSec % 86400L) / 3600L;
+        long mins = (totalSec % 3600L) / 60L;
+        long secs = totalSec % 60L;
+        StringBuilder sb = new StringBuilder();
+        if (days > 0) sb.append(days).append('d').append(' ');
+        if (days > 0 || hours > 0) sb.append(hours).append('h').append(' ');
+        if (days > 0 || hours > 0 || mins > 0) sb.append(mins).append('m').append(' ');
+        sb.append(secs).append('s');
+        return sb.toString().trim();
     }
 }

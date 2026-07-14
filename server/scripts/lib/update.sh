@@ -15,6 +15,9 @@ update_standalone() {
   ensure_env_file
   FLM_SKIP_DEPS=1
   export FLM_SKIP_DEPS
+  # Updates must never initdb / wipe Postgres. Existing cluster only.
+  unset FLM_ALLOW_DB_INIT
+  unset FLM_ALLOW_DB_WIPE
 
   log_header "Updating FLM Platform (Standalone) — ${component}"
 

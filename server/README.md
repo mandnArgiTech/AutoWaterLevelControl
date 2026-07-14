@@ -307,11 +307,13 @@ Use **`remote-update`** when you fixed backend or frontend code — **much faste
 | **Frontend only** (React UI) | `./flm-server.sh remote-update-frontend` | 2–4 min |
 | **Code sync only** (no rebuild) | `./flm-server.sh remote-sync` | ~30 sec |
 
+**Database safety:** `remote-update` / `update` never run `initdb` and never delete `postgres/data`. If Postgres is down, the update only **starts the existing cluster**. First-time DB creation requires `FLM_ALLOW_DB_INIT=1` (set automatically by full `install` / `remote-install`). Intentional wipe of a non-empty data dir additionally needs `FLM_ALLOW_DB_WIPE=1`.
+
 **What `remote-update` does:**
 
 1. `rsync` your local `server/` → `/opt/flm` on VPS (keeps remote `.env`, MQTT certs, database)
 2. SSH in and **rebuild + restart** only what you need:
-   - **Backend:** `mvn package` → restart `java -jar`
+   - **Backend:** `mvn package` → restart `java -jar` (starts existing Postgres if needed; **never** re-inits DB)
    - **Frontend:** `npm run build` → reload **nginx**
 3. Verifies web UI still on **port 80**
 

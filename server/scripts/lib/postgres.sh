@@ -112,6 +112,25 @@ postgres_init_cluster() {
     return 0
   fi
 
+  # Guard: updates must never initdb. First-time install sets FLM_ALLOW_DB_INIT=1.
+  if [[ "${FLM_ALLOW_DB_INIT:-}" != "1" ]]; then
+    log_fail "No PostgreSQL cluster at $PG_DATA_DIR (missing PG_VERSION)"
+    log_fail "Refusing initdb — set FLM_ALLOW_DB_INIT=1 for first-time install only"
+    log_fail "Routine updates must start an existing cluster, never create a new one"
+    return 1
+  fi
+
+  # Never wipe a non-empty data dir — missing PG_VERSION can happen after a bad stop;
+  # destroying it would erase production history.
+  if [[ -d "$PG_DATA_DIR" ]] && [[ -n "$(ls -A "$PG_DATA_DIR" 2>/dev/null || true)" ]]; then
+    log_fail "Refusing to initdb: $PG_DATA_DIR is not empty but has no PG_VERSION"
+    log_fail "Restore / backup, or move the dir aside. Set FLM_ALLOW_DB_WIPE=1 only if intentional."
+    if [[ "${FLM_ALLOW_DB_WIPE:-}" != "1" ]]; then
+      return 1
+    fi
+    log_warn "FLM_ALLOW_DB_WIPE=1 — removing $PG_DATA_DIR"
+  fi
+
   log_info "Initializing PostgreSQL cluster at $PG_DATA_DIR"
   mkdir -p "$(dirname "$PG_DATA_DIR")"
   pwfile="$(dirname "$PG_DATA_DIR")/.pwfile"
@@ -119,7 +138,12 @@ postgres_init_cluster() {
   chmod 600 "$pwfile"
 
   # initdb must run as postgres user; prepare empty dir owned by postgres
-  rm -rf "$PG_DATA_DIR"
+  if [[ "${FLM_ALLOW_DB_WIPE:-}" == "1" ]] || [[ ! -d "$PG_DATA_DIR" ]] || [[ -z "$(ls -A "$PG_DATA_DIR" 2>/dev/null || true)" ]]; then
+    rm -rf "$PG_DATA_DIR"
+  else
+    log_fail "Cannot create empty data dir without wipe flag"
+    return 1
+  fi
   mkdir -p "$PG_DATA_DIR"
   if id "$PG_RUN_USER" >/dev/null 2>&1; then
     _pg_run_as_root chown -R "$PG_RUN_USER:$PG_RUN_USER" "$(dirname "$PG_DATA_DIR")"
@@ -169,12 +193,22 @@ EOF
   log_ok "Cluster initialized (superuser: ${POSTGRES_USER:-flmAdmin})"
 }
 
+# Prefer common.sh implementation (pidfile + pg_isready fallback).
+# Redefine here only if common was not sourced with SERVER_ROOT set — keep in sync.
 is_postgres_standalone_running() {
   local pidfile="$PG_DATA_DIR/postmaster.pid"
   if [[ -f "$pidfile" ]]; then
     local pid
     pid="$(head -1 "$pidfile" 2>/dev/null || true)"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  if [[ -f "$PG_DATA_DIR/PG_VERSION" ]]; then
+    local pg_isready_bin
+    pg_isready_bin="$(_pg_find_bin pg_isready 2>/dev/null)" || true
+    if [[ -n "${pg_isready_bin:-}" ]] && \
+       "$pg_isready_bin" -h localhost -p "${POSTGRES_PORT:-5432}" -q 2>/dev/null; then
       return 0
     fi
   fi
@@ -186,8 +220,19 @@ postgres_start() {
   local pg_ctl_bin
   pg_ctl_bin="$(_pg_bin pg_ctl)" || return 1
 
-  postgres_disable_system_service
-  postgres_init_cluster || return 1
+  if is_postgres_standalone_running; then
+    log_info "PostgreSQL already running"
+    return 0
+  fi
+
+  # Only touch system Postgres / init when we still need to bring FLM cluster up
+  if [[ ! -f "$PG_DATA_DIR/PG_VERSION" ]]; then
+    postgres_disable_system_service
+    postgres_init_cluster || return 1
+  else
+    # Existing cluster: free the port if something else holds it, but never initdb
+    postgres_disable_system_service
+  fi
 
   if is_postgres_standalone_running; then
     log_info "PostgreSQL already running"
@@ -298,6 +343,9 @@ postgres_install_standalone() {
   source "$_pg_lib_dir/deps.sh"
   ensure_postgres || return 1
   ensure_env_file
+
+  # Explicit opt-in for initdb (first install / intentional re-init only)
+  export FLM_ALLOW_DB_INIT="${FLM_ALLOW_DB_INIT:-1}"
 
   log_step 1 3 "Initializing / starting cluster"
   postgres_start || return 1

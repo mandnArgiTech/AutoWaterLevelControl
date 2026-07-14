@@ -49,6 +49,8 @@ show_banner() {
 install_all_standalone() {
   log_header "Installing FULL Platform (Standalone — default production)"
   local total=6
+  # First-time install may create the Postgres cluster; updates must not.
+  export FLM_ALLOW_DB_INIT=1
 
   log_step 1 "$total" "System dependencies (Java, Node, nginx, Docker, OpenSSL)"
   deps_install_standalone || return 1

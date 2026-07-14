@@ -8,6 +8,7 @@
 
 #include "TankCalculator.h"
 #include "../sensor/DHT11Ambient.h"
+#include "../utils/TimeManager.h"
 #include <ESP8266WiFi.h>
 
 static void applyAmbientReading(DHT11Ambient* ambient, WaterLevel& level) {
@@ -403,7 +404,9 @@ String TankCalculator::getMQTTJson(const String& timestamp) const {
     doc["deviceName"] = mqttCfg.deviceName;
     doc["chipId"] = String(ESP.getChipId(), HEX);
     doc["timestamp"] = timestamp;
-    
+    doc["uptimeMs"] = TimeManager::getInstance().getUptimeMs();
+    doc["uptime"] = TimeManager::getInstance().getUptimeString();
+
     // Water level data
     JsonObject level = doc["level"].to<JsonObject>();
     level["percentFilled"] = round(_lastLevel.percentFilled * 10) / 10.0;

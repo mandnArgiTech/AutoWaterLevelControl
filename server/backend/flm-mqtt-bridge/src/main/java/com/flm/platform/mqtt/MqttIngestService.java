@@ -131,6 +131,11 @@ public class MqttIngestService implements MqttCallbackExtended {
         if ("status".equals(subtopic)) {
             JsonNode root = objectMapper.readTree(payload);
             device.setOnline(root.path("online").asBoolean(false));
+            if (root.path("uptime").isNumber()) {
+                device.setUptimeMs(root.path("uptime").asLong());
+            } else if (root.path("uptimeMs").isNumber()) {
+                device.setUptimeMs(root.path("uptimeMs").asLong());
+            }
             deviceRepository.save(device);
             return;
         }
@@ -148,6 +153,11 @@ public class MqttIngestService implements MqttCallbackExtended {
             JsonNode sensor = root.path("sensor");
             if (sensor.path("temperatureC").isNumber()) {
                 reading.setTemperatureC(sensor.path("temperatureC").asDouble());
+            }
+            if (root.path("uptimeMs").isNumber()) {
+                device.setUptimeMs(root.path("uptimeMs").asLong());
+            } else if (root.path("uptime").isNumber()) {
+                device.setUptimeMs(root.path("uptime").asLong());
             }
             device.setOnline(true);
             deviceRepository.save(device);
