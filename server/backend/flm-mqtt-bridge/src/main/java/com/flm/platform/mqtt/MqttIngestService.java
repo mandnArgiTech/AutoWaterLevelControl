@@ -2,26 +2,23 @@ package com.flm.platform.mqtt;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.flm.platform.domain.Device;
-import com.flm.platform.domain.DeviceRepository;
-import com.flm.platform.domain.LevelReading;
-import com.flm.platform.domain.LevelReadingRepository;
+import com.flm.platform.mqtt.telemetry.DeviceIdCache;
+import com.flm.platform.mqtt.telemetry.ReadingBatchWriter;
+import com.flm.platform.mqtt.telemetry.TelemetrySample;
 import org.eclipse.paho.client.mqttv3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
- * Subscribes to Mosquitto and ingests ESP8266 payloads.
- * Topic: {deviceTag}/{topicPrefix}/{subtopic}  e.g. tank1_a9ad51/water/level
- *
- * Device must be registered in {@code devices} — unregistered tags are ignored.
+ * Subscribes to Mosquitto and enqueues typed telemetry samples for batch JDBC write.
+ * Topic: {deviceTag}/{topicPrefix}/{subtopic}  e.g. tank2_34ea20/water/level
  */
 @Service
 @EnableConfigurationProperties(MqttProperties.class)
@@ -30,24 +27,24 @@ public class MqttIngestService implements MqttCallbackExtended {
     private static final Logger log = LoggerFactory.getLogger(MqttIngestService.class);
 
     private final MqttProperties props;
-    private final DeviceRepository deviceRepository;
-    private final LevelReadingRepository readingRepository;
     private final ObjectMapper objectMapper;
     private final MqttTopicActivityStore activityStore;
+    private final DeviceIdCache deviceIdCache;
+    private final ReadingBatchWriter batchWriter;
     private MqttClient client;
 
     public MqttIngestService(
         MqttProperties props,
-        DeviceRepository deviceRepository,
-        LevelReadingRepository readingRepository,
         ObjectMapper objectMapper,
-        MqttTopicActivityStore activityStore
+        MqttTopicActivityStore activityStore,
+        DeviceIdCache deviceIdCache,
+        ReadingBatchWriter batchWriter
     ) {
         this.props = props;
-        this.deviceRepository = deviceRepository;
-        this.readingRepository = readingRepository;
         this.objectMapper = objectMapper;
         this.activityStore = activityStore;
+        this.deviceIdCache = deviceIdCache;
+        this.batchWriter = batchWriter;
     }
 
     @PostConstruct
@@ -63,14 +60,12 @@ public class MqttIngestService implements MqttCallbackExtended {
             options.setPassword(props.getPassword().toCharArray());
         }
         client.connect(options);
-        // Initial subscribe also happens in connectComplete(false, ...)
         log.info("MQTT bridge connecting to {} filter={}", props.getBrokerUrl(), props.getTopicFilter());
     }
 
     private void subscribeTopics() throws MqttException {
         if (client == null || !client.isConnected()) return;
         client.subscribe(props.getTopicFilter(), props.getQos());
-        // $SYS is outside '#' under Mosquitto — explicit subscribe for broker live stats
         try {
             client.subscribe("$SYS/broker/#", 0);
             log.info("MQTT bridge subscribed filter={} and $SYS/broker/#", props.getTopicFilter());
@@ -125,7 +120,6 @@ public class MqttIngestService implements MqttCallbackExtended {
     @Override
     public void deliveryComplete(IMqttDeliveryToken token) {}
 
-    @Transactional
     public void handleMessage(String topic, String payload) throws Exception {
         String[] parts = topic.split("/");
         if (parts.length < 3) return;
@@ -133,52 +127,75 @@ public class MqttIngestService implements MqttCallbackExtended {
         String deviceTag = parts[0];
         String subtopic = parts[parts.length - 1];
 
-        Optional<Device> deviceOpt = deviceRepository.findByDeviceTag(deviceTag);
+        Optional<DeviceIdCache.CachedDevice> deviceOpt = deviceIdCache.lookup(deviceTag);
         if (deviceOpt.isEmpty()) {
-            // Visible in production logs — silent drop is the #1 "MQTT works but UI empty" cause
             log.warn("Ignoring MQTT {} — deviceTag '{}' is not registered (POST /api/devices)",
                 subtopic, deviceTag);
             return;
         }
-        Device device = deviceOpt.get();
-        device.setLastSeenAt(Instant.now());
+        UUID deviceId = deviceOpt.get().deviceId();
+        Instant now = Instant.now();
+        JsonNode root = objectMapper.readTree(payload);
 
         if ("status".equals(subtopic)) {
-            JsonNode root = objectMapper.readTree(payload);
-            device.setOnline(root.path("online").asBoolean(false));
-            if (root.path("uptime").isNumber()) {
-                device.setUptimeMs(root.path("uptime").asLong());
-            } else if (root.path("uptimeMs").isNumber()) {
-                device.setUptimeMs(root.path("uptimeMs").asLong());
-            }
-            deviceRepository.save(device);
+            boolean online = root.path("online").asBoolean(false);
+            Long uptimeMs = readUptimeMs(root);
+            Short rssi = root.path("rssi").isNumber() ? (short) root.path("rssi").asInt() : null;
+            batchWriter.enqueue(new TelemetrySample(
+                deviceId, now,
+                null, null, null, null, null, null, null, null,
+                uptimeMs, rssi, online, false
+            ));
             return;
         }
 
         if ("level".equals(subtopic)) {
-            LevelReading reading = new LevelReading();
-            reading.setDevice(device);
-            reading.setPayloadJson(payload);
-            JsonNode root = objectMapper.readTree(payload);
             JsonNode level = root.path("level");
-            if (!level.isMissingNode()) {
-                reading.setPercentFilled(level.path("percentFilled").asDouble());
-                reading.setVolumeLiters(level.path("volumeLiters").asDouble());
-            }
             JsonNode sensor = root.path("sensor");
-            if (sensor.path("temperatureC").isNumber()) {
-                reading.setTemperatureC(sensor.path("temperatureC").asDouble());
+            JsonNode battery = root.path("battery");
+
+            Float pct = level.path("percentFilled").isNumber() ? (float) level.path("percentFilled").asDouble() : null;
+            Float vol = level.path("volumeLiters").isNumber() ? (float) level.path("volumeLiters").asDouble() : null;
+            Short waterMm = toShort(level, "waterHeightMm");
+            if (waterMm == null && level.path("waterHeightCm").isNumber()) {
+                waterMm = (short) Math.round(level.path("waterHeightCm").asDouble() * 10.0);
             }
-            if (root.path("uptimeMs").isNumber()) {
-                device.setUptimeMs(root.path("uptimeMs").asLong());
-            } else if (root.path("uptime").isNumber()) {
-                device.setUptimeMs(root.path("uptime").asLong());
+            Short distMm = toShort(sensor, "distanceMm");
+            if (distMm == null && sensor.path("distanceCm").isNumber()) {
+                distMm = (short) Math.round(sensor.path("distanceCm").asDouble() * 10.0);
             }
-            device.setOnline(true);
-            deviceRepository.save(device);
-            readingRepository.save(reading);
-            log.debug("Ingested level for {} pct={}", deviceTag, reading.getPercentFilled());
+            Float tempC = sensor.path("temperatureC").isNumber() ? (float) sensor.path("temperatureC").asDouble() : null;
+            Short humidity = sensor.path("humidityPct").isNumber() ? (short) sensor.path("humidityPct").asInt() : null;
+            Short battPct = battery.path("percent").isNumber() ? (short) battery.path("percent").asInt() : null;
+            Short battMv = null;
+            if (battery.path("voltage").isNumber()) {
+                battMv = (short) Math.round(battery.path("voltage").asDouble() * 1000.0);
+            } else if (battery.path("millivolts").isNumber()) {
+                battMv = (short) battery.path("millivolts").asInt();
+            }
+            Long uptimeMs = readUptimeMs(root);
+            Short rssi = root.path("rssi").isNumber() ? (short) root.path("rssi").asInt() : null;
+
+            batchWriter.enqueue(new TelemetrySample(
+                deviceId, now,
+                pct, vol, waterMm, distMm, tempC, humidity, battMv, battPct,
+                uptimeMs, rssi, true, true
+            ));
+            log.debug("Queued level for {} pct={}", deviceTag, pct);
         }
+    }
+
+    private static Long readUptimeMs(JsonNode root) {
+        if (root.path("uptimeMs").isNumber()) return root.path("uptimeMs").asLong();
+        if (root.path("uptime").isNumber()) return root.path("uptime").asLong();
+        return null;
+    }
+
+    private static Short toShort(JsonNode node, String field) {
+        if (node == null || !node.path(field).isNumber()) return null;
+        int v = node.path(field).asInt();
+        if (v < Short.MIN_VALUE || v > Short.MAX_VALUE) return null;
+        return (short) v;
     }
 
     public boolean isConnected() {

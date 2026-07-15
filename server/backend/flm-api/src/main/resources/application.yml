@@ -1,10 +1,17 @@
 spring:
   application:
     name: flm-platform
+  threads:
+    virtual:
+      enabled: true
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/flmDB}
     username: ${POSTGRES_USER:flmAdmin}
     password: ${POSTGRES_PASSWORD:flmPass}
+    hikari:
+      maximum-pool-size: ${FLM_DB_POOL_SIZE:30}
+      minimum-idle: 5
+      connection-timeout: 5000
   jpa:
     hibernate:
       ddl-auto: validate
@@ -22,6 +29,11 @@ spring:
 
 server:
   port: 8080
+  tomcat:
+    max-connections: 8192
+    accept-count: 500
+    threads:
+      max: 200
 
 flm:
   jwt:
@@ -48,6 +60,12 @@ flm:
     dynsec-admin-user: ${MQTT_DYNSEC_ADMIN:flmDynsecAdmin}
     dynsec-admin-password: ${MQTT_DYNSEC_PASS:flmDynsecPass}
     control-timeout-ms: 5000
+  telemetry:
+    batch-size: 1000
+    flush-interval-ms: 500
+    queue-capacity: 50000
+    retention-months: 60
+    precreate-months: 3
   platform:
     server-root: ${FLM_SERVER_ROOT:/opt/flm}
     postgres-compose-file: docker-compose.postgres.yml

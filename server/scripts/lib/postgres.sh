@@ -171,13 +171,19 @@ postgres_init_cluster() {
   fi
   rm -f "$pwfile"
 
-  # Configure listen + port
+  # Configure listen + port + scale-oriented memory (VPS with ≥8–16 GB RAM)
   {
     echo "listen_addresses = 'localhost'"
     echo "port = ${POSTGRES_PORT:-5432}"
     echo "password_encryption = scram-sha-256"
     echo "logging_collector = off"
     echo "log_destination = 'stderr'"
+    echo "shared_buffers = 2GB"
+    echo "effective_cache_size = 8GB"
+    echo "max_wal_size = 4GB"
+    echo "checkpoint_completion_target = 0.9"
+    echo "wal_compression = on"
+    echo "max_connections = 200"
   } >> "$PG_DATA_DIR/postgresql.conf"
 
   cat > "$PG_DATA_DIR/pg_hba.conf" <<EOF
@@ -265,6 +271,24 @@ postgres_start() {
     return 1
   fi
   log_ok "PostgreSQL started on port ${POSTGRES_PORT:-5432}"
+  postgres_apply_scale_settings || true
+}
+
+postgres_apply_scale_settings() {
+  # Best-effort for already-initialized clusters (new clusters get these via postgresql.conf)
+  local psql_bin
+  psql_bin="$(_pg_find_bin psql 2>/dev/null)" || return 0
+  export PGPASSWORD="${POSTGRES_PASSWORD:-flmPass}"
+  "$psql_bin" -h localhost -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-flmAdmin}" -d postgres -v ON_ERROR_STOP=0 <<'SQL' >/dev/null 2>&1 || true
+ALTER SYSTEM SET shared_buffers = '2GB';
+ALTER SYSTEM SET effective_cache_size = '8GB';
+ALTER SYSTEM SET max_wal_size = '4GB';
+ALTER SYSTEM SET checkpoint_completion_target = 0.9;
+ALTER SYSTEM SET wal_compression = on;
+ALTER SYSTEM SET max_connections = 200;
+SELECT pg_reload_conf();
+SQL
+  unset PGPASSWORD
 }
 
 postgres_ensure_database() {

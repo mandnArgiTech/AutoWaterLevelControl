@@ -45,12 +45,10 @@ export interface DeviceSummary {
 }
 
 export interface ReadingPoint {
-  id: string;
   receivedAt: string;
   percentFilled?: number;
   volumeLiters?: number;
   temperatureC?: number;
-  payloadJson: string;
 }
 
 export interface UserSummary {
