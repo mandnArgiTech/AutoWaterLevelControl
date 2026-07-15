@@ -30,6 +30,8 @@ flm:
     access-token-ttl-seconds: 900
     refresh-token-ttl-seconds: 2592000
     step-up-ttl-seconds: 300
+    # false for http:// sites (Secure cookies are ignored by browsers over HTTP)
+    cookie-secure: ${FLM_COOKIE_SECURE:false}
     mfa-required-roles: SUPER_ADMIN
     max-failed-attempts: 5
     lockout-minutes: 15

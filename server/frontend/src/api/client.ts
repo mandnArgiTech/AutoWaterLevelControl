@@ -39,10 +39,10 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 
 async function refreshSession(): Promise<LoginResponse> {
   if (!refreshPromise) {
-    refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
+    refreshPromise = fetchWithTimeout(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
-    }).then(async (res) => {
+    }, 8000).then(async (res) => {
       if (!res.ok) throw new Error('Session expired');
       const data = (await res.json()) as LoginResponse;
       setAccessToken(data.token);
@@ -52,13 +52,23 @@ async function refreshSession(): Promise<LoginResponse> {
   return refreshPromise;
 }
 
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     ...init,
     cache: 'no-store',
     credentials: 'include',
     headers: authHeaders(init?.headers as HeadersInit),
-  });
+  }, 15000);
   if (res.status === 401 && retry && !path.includes('/auth/login')) {
     await refreshSession();
     return request<T>(path, init, false);

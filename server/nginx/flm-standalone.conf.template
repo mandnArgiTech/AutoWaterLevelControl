@@ -13,6 +13,21 @@ http {
     sendfile      on;
     keepalive_timeout 65;
 
+    # Compress JS/CSS/JSON — without this, a 640KB SPA download is multi-second on many links
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_types
+        text/plain
+        text/css
+        text/javascript
+        application/javascript
+        application/json
+        application/xml
+        image/svg+xml;
+
     # Avoid stale HTML after deploys (browser would keep an old index → old JS)
     map $sent_http_content_type $cache_control_html {
         default                 "";
@@ -31,6 +46,10 @@ http {
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 5s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
             proxy_no_cache 1;
             proxy_cache_bypass 1;
             add_header Cache-Control "no-store, no-cache, must-revalidate" always;
