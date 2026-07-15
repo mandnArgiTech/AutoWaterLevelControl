@@ -112,7 +112,9 @@ ensure_client() {
 ensure_role bridge \
   publishClientSend '#' \
   publishClientReceive '#' \
-  subscribePattern '#'
+  subscribePattern '#' \
+  publishClientReceive '$SYS/#' \
+  subscribePattern '$SYS/#'
 
 ensure_role vendor_demo \
   publishClientReceive '+/water/#' \

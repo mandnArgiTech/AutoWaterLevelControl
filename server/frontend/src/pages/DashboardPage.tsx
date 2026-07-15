@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState, type MouseEvent } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Area,
   AreaChart,
@@ -36,14 +36,41 @@ function DeviceMonitorCard({
   onSelect,
   canCommand,
   compact,
+  onReadingRequested,
 }: {
   device: DeviceSummary;
   selected: boolean;
   onSelect: () => void;
   canCommand: boolean;
   compact?: boolean;
+  onReadingRequested?: () => void;
 }) {
   const fill = device.latestPercentFilled ?? 0;
+  const [cmdBusy, setCmdBusy] = useState(false);
+  const [cmdMsg, setCmdMsg] = useState<{ tone: 'ok' | 'err' | 'info'; text: string } | null>(null);
+
+  async function requestFreshReading(e: MouseEvent) {
+    e.stopPropagation();
+    setCmdBusy(true);
+    setCmdMsg({ tone: 'info', text: 'Sending command to device…' });
+    try {
+      const res = await api.deviceCommand(device.id, 'read');
+      setCmdMsg({
+        tone: 'ok',
+        text: `Command sent on ${res.topic ?? 'MQTT'} — waiting for a new reading…`,
+      });
+      onReadingRequested?.();
+      window.setTimeout(() => onReadingRequested?.(), 2500);
+      window.setTimeout(() => onReadingRequested?.(), 6000);
+    } catch (err) {
+      setCmdMsg({
+        tone: 'err',
+        text: err instanceof Error ? err.message : 'Failed to send command',
+      });
+    } finally {
+      setCmdBusy(false);
+    }
+  }
 
   return (
     <article
@@ -98,13 +125,14 @@ function DeviceMonitorCard({
           <button
             type="button"
             className="btn btn-soft"
-            onClick={(e) => {
-              e.stopPropagation();
-              api.deviceCommand(device.id, 'read');
-            }}
+            disabled={cmdBusy}
+            onClick={requestFreshReading}
           >
-            Request fresh reading
+            {cmdBusy ? 'Sending…' : 'Request fresh reading'}
           </button>
+          {cmdMsg && (
+            <p className={`cmd-feedback cmd-feedback-${cmdMsg.tone}`}>{cmdMsg.text}</p>
+          )}
         </div>
       )}
     </article>
@@ -114,6 +142,7 @@ function DeviceMonitorCard({
 export default function DashboardPage() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string>('');
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -132,6 +161,12 @@ export default function DashboardPage() {
     refetchInterval: 15_000,
   });
 
+  function refreshAfterCommand() {
+    void queryClient.invalidateQueries({ queryKey: ['devices'] });
+    if (activeId) {
+      void queryClient.invalidateQueries({ queryKey: ['readings', activeId] });
+    }
+  }
   const chartData = useMemo(
     () =>
       (readings.data?.items ?? [])
@@ -202,6 +237,7 @@ export default function DashboardPage() {
                 onSelect={() => setSelectedId(d.id)}
                 canCommand={canCommand}
                 compact={isMobile}
+                onReadingRequested={refreshAfterCommand}
               />
             ))}
           </div>

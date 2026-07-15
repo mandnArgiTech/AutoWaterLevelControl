@@ -133,8 +133,11 @@ export const api = {
     }),
 
   deviceCommand: (deviceId: string, command: string) =>
-    request<{ status: string }>(`/devices/${deviceId}/command`, {
-      method: 'POST',
-      body: JSON.stringify({ command }),
-    }),
+    request<{ status: string; command?: string; topic?: string; deviceTag?: string }>(
+      `/devices/${deviceId}/command`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ command }),
+      },
+    ),
 };

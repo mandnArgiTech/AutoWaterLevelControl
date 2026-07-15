@@ -2,11 +2,16 @@ package com.flm.platform.admin.web;
 
 import com.flm.platform.admin.service.AuditService;
 import com.flm.platform.admin.service.MqttControlService;
+import com.flm.platform.mqtt.MqttIngestService;
+import com.flm.platform.mqtt.MqttTopicActivityStore;
 import com.flm.platform.security.AuthPrincipal;
 import com.flm.platform.security.RequiresStepUp;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -15,16 +20,49 @@ public class PlatformMqttController {
 
     private final MqttControlService mqttControlService;
     private final AuditService auditService;
+    private final MqttTopicActivityStore activityStore;
+    private final MqttIngestService mqttIngestService;
 
-    public PlatformMqttController(MqttControlService mqttControlService, AuditService auditService) {
+    public PlatformMqttController(
+        MqttControlService mqttControlService,
+        AuditService auditService,
+        MqttTopicActivityStore activityStore,
+        MqttIngestService mqttIngestService
+    ) {
         this.mqttControlService = mqttControlService;
         this.auditService = auditService;
+        this.activityStore = activityStore;
+        this.mqttIngestService = mqttIngestService;
     }
 
     @GetMapping("/status")
     @PreAuthorize("hasAuthority('PLATFORM_MQTT_READ')")
     public Map<String, Object> status() {
-        return mqttControlService.status();
+        Map<String, Object> result = new LinkedHashMap<>(mqttControlService.status());
+        result.put("bridgeConnected", mqttIngestService.isConnected());
+        result.putAll(activityStore.brokerStats());
+        return result;
+    }
+
+    @GetMapping("/overview")
+    @PreAuthorize("hasAuthority('PLATFORM_MQTT_READ')")
+    public Map<String, Object> overview() {
+        return status();
+    }
+
+    @GetMapping("/topics")
+    @PreAuthorize("hasAuthority('PLATFORM_MQTT_READ')")
+    public List<MqttTopicActivityStore.TopicActivity> topics(
+        @RequestParam(defaultValue = "false") boolean includeSys
+    ) {
+        return activityStore.listTopics(includeSys, Duration.ofSeconds(60));
+    }
+
+    @GetMapping("/topic")
+    @PreAuthorize("hasAuthority('PLATFORM_MQTT_READ')")
+    public MqttTopicActivityStore.TopicActivity topic(@RequestParam("name") String name) {
+        return activityStore.getTopic(name)
+            .orElseThrow(() -> new IllegalArgumentException("Topic not seen yet: " + name));
     }
 
     @GetMapping("/clients")

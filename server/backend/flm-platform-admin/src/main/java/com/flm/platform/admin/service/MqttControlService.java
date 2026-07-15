@@ -3,6 +3,7 @@ package com.flm.platform.admin.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flm.platform.mqtt.MqttProperties;
+import jakarta.annotation.PostConstruct;
 import org.eclipse.paho.client.mqttv3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +38,17 @@ public class MqttControlService {
         this.dynsecPass = dynsecPass;
         this.timeoutMs = timeoutMs;
         this.objectMapper = objectMapper;
+    }
+
+    @PostConstruct
+    public void ensureBridgeSysAcls() {
+        try {
+            addRoleAcl("bridge", "subscribePattern", "$SYS/#", true);
+            addRoleAcl("bridge", "publishClientReceive", "$SYS/#", true);
+            log.info("Ensured bridge role can subscribe to $SYS/#");
+        } catch (Exception e) {
+            log.warn("Could not ensure bridge $SYS ACL (broker stats may be empty): {}", e.getMessage());
+        }
     }
 
     public Map<String, Object> status() {
@@ -102,8 +114,10 @@ public class MqttControlService {
         addRoleAcl(roleName, "publishClientSend", deviceTag + "/water/level", true);
         addRoleAcl(roleName, "publishClientSend", deviceTag + "/water/status", true);
         addRoleAcl(roleName, "publishClientReceive", deviceTag + "/water/command", true);
+        addRoleAcl(roleName, "subscribePattern", deviceTag + "/water/command", true);
         addRoleAcl(roleName, "publishClientSend", deviceTag + "/motor/status", true);
         addRoleAcl(roleName, "publishClientReceive", deviceTag + "/motor/command", true);
+        addRoleAcl(roleName, "subscribePattern", deviceTag + "/motor/command", true);
         try {
             createClient(username, password);
         } catch (Exception e) {

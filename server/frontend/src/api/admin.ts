@@ -19,6 +19,7 @@ async function adminRequest<T>(
   const token = localStorage.getItem('flm_token');
   const res = await fetch(`${import.meta.env.VITE_API_BASE ?? '/api'}${path}`, {
     ...init,
+    cache: 'no-store',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
@@ -29,7 +30,7 @@ async function adminRequest<T>(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message ?? 'Request failed');
+    throw new Error(err.message ?? err.error ?? 'Request failed');
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -59,6 +60,24 @@ export const adminApi = {
     }),
 
   mqttStatus: () => adminRequest<Record<string, unknown>>(`${ADMIN}/mqtt/status`),
+  mqttTopics: (includeSys = false) =>
+    adminRequest<Array<{
+      topic: string;
+      lastSeenAt: string;
+      messageCount: number;
+      lastPayload: string;
+      retained: boolean;
+      sys: boolean;
+    }>>(`${ADMIN}/mqtt/topics?includeSys=${includeSys}`),
+  mqttTopic: (name: string) =>
+    adminRequest<{
+      topic: string;
+      lastSeenAt: string;
+      messageCount: number;
+      lastPayload: string;
+      retained: boolean;
+      sys: boolean;
+    }>(`${ADMIN}/mqtt/topic?name=${encodeURIComponent(name)}`),
   mqttClients: () => adminRequest<unknown>(`${ADMIN}/mqtt/clients`),
   createMqttClient: (username: string, password: string) =>
     adminRequest<void>(`${ADMIN}/mqtt/clients`, {

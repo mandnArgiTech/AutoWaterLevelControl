@@ -22,4 +22,16 @@ class SqlWorkspaceServiceTest {
         SqlWorkspaceService svc = new SqlWorkspaceService(null, null, null, 500, 30);
         assertEquals(SqlWorkspaceService.SqlClass.WRITE, svc.classify("UPDATE users SET active = true WHERE id = 'x'"));
     }
+
+    @Test
+    void normalizeStripsTrailingSemicolons() {
+        assertEquals(
+            "SELECT * FROM level_readings",
+            SqlWorkspaceService.normalizeSql("SELECT * FROM level_readings ;")
+        );
+        assertEquals(
+            "SELECT 1",
+            SqlWorkspaceService.normalizeSql("SELECT 1;;;")
+        );
+    }
 }

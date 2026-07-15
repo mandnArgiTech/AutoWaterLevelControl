@@ -66,16 +66,17 @@ public class SqlWorkspaceService {
     }
 
     public Map<String, Object> execute(AuthPrincipal actor, String sql, boolean confirmDestructive, String confirmationPhrase) {
-        if (sql.contains(";") && sql.trim().split(";").length > 1) {
-            String[] parts = sql.trim().split(";");
-            for (String part : parts) {
-                if (!part.isBlank() && classify(part) != SqlClass.READ) {
-                    throw new IllegalArgumentException("Multi-statement write batches are not allowed");
-                }
-            }
+        String normalized = normalizeSql(sql);
+        if (normalized.isBlank()) {
+            throw new IllegalArgumentException("SQL is empty");
         }
 
-        SqlClass cls = classify(sql);
+        // Trailing ';' is common in editors; Postgres JDBC rejects it. Allow only single-statement.
+        if (normalized.contains(";")) {
+            throw new IllegalArgumentException("Only a single SQL statement is allowed");
+        }
+
+        SqlClass cls = classify(normalized);
         if (cls == SqlClass.DESTRUCTIVE || cls == SqlClass.DDL) {
             if (!confirmDestructive || !"EXECUTE".equals(confirmationPhrase)) {
                 throw new IllegalArgumentException("Destructive/DDL statements require confirmDestructive and confirmationPhrase=EXECUTE");
@@ -92,7 +93,7 @@ public class SqlWorkspaceService {
             jdbcStmt.setMaxRows(maxRows);
 
             if (cls == SqlClass.READ) {
-                try (ResultSet rs = jdbcStmt.executeQuery(sql)) {
+                try (ResultSet rs = jdbcStmt.executeQuery(normalized)) {
                     ResultSetMetaData meta = rs.getMetaData();
                     int cols = meta.getColumnCount();
                     List<String> columns = new ArrayList<>();
@@ -102,7 +103,13 @@ public class SqlWorkspaceService {
                     while (rs.next() && count < maxRows) {
                         Map<String, Object> row = new LinkedHashMap<>();
                         for (int i = 1; i <= cols; i++) {
-                            row.put(columns.get(i - 1), rs.getObject(i));
+                            Object val = rs.getObject(i);
+                            if (val instanceof java.util.UUID u) {
+                                val = u.toString();
+                            } else if (val instanceof Timestamp ts) {
+                                val = ts.toInstant().toString();
+                            }
+                            row.put(columns.get(i - 1), val);
                         }
                         rows.add(row);
                         count++;
@@ -110,26 +117,39 @@ public class SqlWorkspaceService {
                     result.put("columns", columns);
                     result.put("rows", rows);
                     result.put("rowCount", count);
+                    result.put("truncated", count >= maxRows);
                 }
             } else {
-                int updated = jdbcStmt.executeUpdate(sql);
+                int updated = jdbcStmt.executeUpdate(normalized);
                 result.put("updatedRows", updated);
             }
             result.put("durationMs", System.currentTimeMillis() - start);
             result.put("success", true);
             auditService.log(actor, "SQL_EXECUTE", "database", Map.of(
                 "classification", cls.name(),
-                "sqlHash", Integer.toHexString(sql.hashCode()),
+                "sqlHash", Integer.toHexString(normalized.hashCode()),
                 "durationMs", result.get("durationMs")
             ));
             return result;
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
             auditService.log(actor, "SQL_EXECUTE_FAILED", "database", Map.of(
-                "error", e.getMessage(),
+                "error", e.getMessage() != null ? e.getMessage() : "unknown",
                 "classification", cls.name()
             ));
             throw new IllegalStateException("SQL execution failed: " + e.getMessage(), e);
         }
+    }
+
+    /** Strip trailing semicolons / whitespace so editor-style SQL works with Postgres JDBC. */
+    static String normalizeSql(String sql) {
+        if (sql == null) return "";
+        String t = sql.trim();
+        while (t.endsWith(";")) {
+            t = t.substring(0, t.length() - 1).trim();
+        }
+        return t;
     }
 
     @Transactional(readOnly = true)

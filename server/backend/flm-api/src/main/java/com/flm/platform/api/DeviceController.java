@@ -47,8 +47,7 @@ public class DeviceController {
 
     @PostMapping("/{deviceId}/command")
     public Map<String, String> command(@PathVariable UUID deviceId, @RequestBody Map<String, String> body) throws Exception {
-        deviceService.sendCommand(deviceId, body.get("command"));
-        return Map.of("status", "sent");
+        return deviceService.sendCommand(deviceId, body.get("command"));
     }
 }
 

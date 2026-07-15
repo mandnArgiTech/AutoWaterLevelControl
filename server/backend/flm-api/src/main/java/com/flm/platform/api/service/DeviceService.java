@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -89,7 +90,7 @@ public class DeviceService {
             .toList();
     }
 
-    public void sendCommand(UUID deviceId, String command) throws Exception {
+    public Map<String, String> sendCommand(UUID deviceId, String command) throws Exception {
         Device device = deviceRepository.findById(deviceId)
             .orElseThrow(() -> new IllegalArgumentException("Device not found"));
         AuthPrincipal p = tenantGuard.current();
@@ -99,8 +100,19 @@ public class DeviceService {
         if (p.role() == UserRole.VIEWER) {
             throw new TenantGuard.AccessDeniedException("Viewers cannot send commands");
         }
-        String json = "{\"command\":\"" + command + "\"}";
+        if (command == null || command.isBlank()) {
+            throw new IllegalArgumentException("command is required");
+        }
+        String cmd = command.trim();
+        String json = "{\"command\":\"" + cmd.replace("\"", "") + "\"}";
+        String topic = device.getDeviceTag() + "/" + device.getTopicPrefix() + "/command";
         mqttIngestService.publishCommand(device.getDeviceTag(), device.getTopicPrefix(), "command", json);
+        return Map.of(
+            "status", "sent",
+            "command", cmd,
+            "topic", topic,
+            "deviceTag", device.getDeviceTag()
+        );
     }
 
     private DeviceSummary toSummary(Device d) {

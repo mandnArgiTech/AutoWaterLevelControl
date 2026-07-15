@@ -6,7 +6,7 @@ import StepUpModal from '../../components/StepUpModal';
 
 export default function AdminSqlWorkspacePage() {
   const schema = useQuery({ queryKey: ['sql-schema'], queryFn: adminApi.sqlSchema });
-  const [sql, setSql] = useState('SELECT * FROM vendors LIMIT 10;');
+  const [sql, setSql] = useState('SELECT * FROM level_readings LIMIT 50;');
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState('');
   const [stepUpOpen, setStepUpOpen] = useState(false);
@@ -18,15 +18,15 @@ export default function AdminSqlWorkspacePage() {
   const runRead = useMutation({
     mutationFn: () => adminApi.sqlExecute(sql),
     onSuccess: (data) => { setResult(data); setError(''); },
-    onError: (e) => setError(e instanceof Error ? e.message : 'Query failed'),
+    onError: (e) => { setResult(null); setError(e instanceof Error ? e.message : 'Query failed'); },
   });
 
   function runQuery(stepUpToken?: string) {
     setError('');
     if (isWrite) {
       adminApi.sqlExecuteWrite(sql, true, 'EXECUTE', stepUpToken!)
-        .then((data) => { setResult(data); setDestructiveOpen(false); })
-        .catch((e) => setError(e instanceof Error ? e.message : 'Query failed'));
+        .then((data) => { setResult(data); setDestructiveOpen(false); setError(''); })
+        .catch((e) => { setResult(null); setError(e instanceof Error ? e.message : 'Query failed'); });
     } else {
       runRead.mutate();
     }
@@ -44,6 +44,7 @@ export default function AdminSqlWorkspacePage() {
 
   const rows = (result?.rows as Record<string, unknown>[]) ?? [];
   const columns = (result?.columns as string[]) ?? (rows[0] ? Object.keys(rows[0]) : []);
+  const hasResult = result != null && !error;
 
   return (
     <div className="page">
@@ -74,9 +75,10 @@ export default function AdminSqlWorkspacePage() {
             </button>
           </form>
           {error && <p className="form-error">{error}</p>}
-          {result && (
+          {hasResult && (
             <p className="muted">
-              {String(result.classification)} — {String(result.rowCount ?? result.updatedRows ?? '')} rows — {String(result.durationMs)}ms
+              {String(result.classification)} — {String(result.rowCount ?? result.updatedRows ?? 0)} rows
+              {result.truncated ? ' (truncated at limit)' : ''} — {String(result.durationMs)}ms
             </p>
           )}
         </section>
@@ -94,19 +96,23 @@ export default function AdminSqlWorkspacePage() {
         </section>
       </div>
 
-      {rows.length > 0 && (
+      {hasResult && (
         <section className="card-panel">
           <h2 className="panel-title">Results</h2>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-              <tbody>
-                {rows.map((row, i) => (
-                  <tr key={i}>{columns.map((c) => <td key={c}>{String(row[c] ?? '')}</td>)}</tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {rows.length === 0 ? (
+            <p className="muted">Query succeeded — 0 rows returned.</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i}>{columns.map((c) => <td key={c}>{String(row[c] ?? '')}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 

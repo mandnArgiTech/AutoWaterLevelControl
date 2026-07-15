@@ -1006,3 +1006,69 @@ code {
   font-size: 0.88rem;
 }
 .form-error { color: #dc2626; margin-top: 0.5rem; }
+
+.cmd-feedback {
+  margin: 0.55rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.cmd-feedback-ok { color: var(--success); }
+.cmd-feedback-err { color: #dc2626; }
+.cmd-feedback-info { color: var(--text-muted); }
+
+.mqtt-topic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 420px;
+  overflow: auto;
+  margin-top: 0.75rem;
+}
+.mqtt-topic-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+.mqtt-topic-row.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.mqtt-topic-row.live code { color: var(--success); }
+.mqtt-sys-toggle {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.85rem;
+  font-size: 0.9rem;
+}
+.mqtt-sys-list .mqtt-topic-row {
+  grid-template-columns: 1fr auto;
+}
+.mqtt-payload {
+  max-height: 420px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mqtt-client-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+.mqtt-client-chip {
+  display: inline-flex;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+

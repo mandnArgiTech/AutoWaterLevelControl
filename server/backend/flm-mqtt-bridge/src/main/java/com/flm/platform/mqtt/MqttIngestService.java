@@ -33,18 +33,21 @@ public class MqttIngestService implements MqttCallbackExtended {
     private final DeviceRepository deviceRepository;
     private final LevelReadingRepository readingRepository;
     private final ObjectMapper objectMapper;
+    private final MqttTopicActivityStore activityStore;
     private MqttClient client;
 
     public MqttIngestService(
         MqttProperties props,
         DeviceRepository deviceRepository,
         LevelReadingRepository readingRepository,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        MqttTopicActivityStore activityStore
     ) {
         this.props = props;
         this.deviceRepository = deviceRepository;
         this.readingRepository = readingRepository;
         this.objectMapper = objectMapper;
+        this.activityStore = activityStore;
     }
 
     @PostConstruct
@@ -67,7 +70,14 @@ public class MqttIngestService implements MqttCallbackExtended {
     private void subscribeTopics() throws MqttException {
         if (client == null || !client.isConnected()) return;
         client.subscribe(props.getTopicFilter(), props.getQos());
-        log.info("MQTT bridge subscribed filter={}", props.getTopicFilter());
+        // $SYS is outside '#' under Mosquitto — explicit subscribe for broker live stats
+        try {
+            client.subscribe("$SYS/broker/#", 0);
+            log.info("MQTT bridge subscribed filter={} and $SYS/broker/#", props.getTopicFilter());
+        } catch (MqttException e) {
+            log.warn("Could not subscribe $SYS/broker/# (ACL?). Live broker stats limited: {}", e.getMessage());
+            log.info("MQTT bridge subscribed filter={}", props.getTopicFilter());
+        }
     }
 
     @PreDestroy
@@ -100,8 +110,13 @@ public class MqttIngestService implements MqttCallbackExtended {
 
     @Override
     public void messageArrived(String topic, MqttMessage message) {
+        String payload = new String(message.getPayload());
+        activityStore.record(topic, payload, message.isRetained());
+        if (topic.startsWith("$SYS/")) {
+            return;
+        }
         try {
-            handleMessage(topic, new String(message.getPayload()));
+            handleMessage(topic, payload);
         } catch (Exception e) {
             log.warn("Skip MQTT message on {}: {}", topic, e.getMessage());
         }
@@ -166,11 +181,16 @@ public class MqttIngestService implements MqttCallbackExtended {
         }
     }
 
+    public boolean isConnected() {
+        return client != null && client.isConnected();
+    }
+
     public void publishCommand(String deviceTag, String topicPrefix, String subtopic, String json) throws MqttException {
-        if (client == null || !client.isConnected()) {
+        if (!isConnected()) {
             throw new IllegalStateException("MQTT client not connected");
         }
         String topic = deviceTag + "/" + topicPrefix + "/" + subtopic;
         client.publish(topic, json.getBytes(), props.getQos(), false);
+        activityStore.record(topic, json, false);
     }
 }

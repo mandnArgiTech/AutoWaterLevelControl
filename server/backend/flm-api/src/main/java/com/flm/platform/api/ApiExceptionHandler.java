@@ -27,4 +27,11 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiError> badRequest(IllegalArgumentException ex) {
         return ResponseEntity.badRequest().body(new ApiError("BAD_REQUEST", ex.getMessage()));
     }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiError> illegalState(IllegalStateException ex) {
+        String msg = ex.getMessage() != null ? ex.getMessage() : "Unexpected state";
+        HttpStatus status = msg.toLowerCase().contains("mqtt") ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.INTERNAL_SERVER_ERROR;
+        return ResponseEntity.status(status).body(new ApiError("STATE_ERROR", msg));
+    }
 }
