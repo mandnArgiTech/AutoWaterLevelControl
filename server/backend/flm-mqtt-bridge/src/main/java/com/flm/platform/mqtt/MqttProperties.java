@@ -10,7 +10,8 @@ public class MqttProperties {
     private String password;
     private boolean tlsEnabled;
     private String caCertPath;
-    private String topicFilter = "+/water/#";
+    /** Catch water, system/announce|health, and {tag}/{capability}/telemetry. */
+    private String topicFilter = "+/+/#";
     private int qos = 1;
 
     public String getBrokerUrl() { return brokerUrl; }

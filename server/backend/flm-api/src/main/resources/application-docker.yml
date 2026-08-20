@@ -12,4 +12,4 @@ flm:
     username: ${FLM_MQTT_USERNAME}
     password: ${FLM_MQTT_PASSWORD}
     tls-enabled: ${FLM_MQTT_TLS_ENABLED:false}
-    topic-filter: ${FLM_MQTT_TOPIC_FILTER:+/water/#}
+    topic-filter: ${FLM_MQTT_TOPIC_FILTER:+/+/#}

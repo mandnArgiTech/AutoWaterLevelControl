@@ -125,6 +125,7 @@ private:
     
     // API handlers - MQTT
     void handleApiMQTTStatus();
+    void handleApiMQTTLog();
     
     // API handlers - Time
     void handleApiTimeStatus();
@@ -137,6 +138,10 @@ private:
     void handleApiRestart();
     void handleApiReset();
     void handleApiInfo();
+
+    void handleDistanceCalibratePage();
+    void handleApiDistanceCalibrateGet();
+    void handleApiDistanceCalibratePost();
 
 #ifdef FLM_BATTERY_MONITOR
     void handleBatteryCalibratePage();

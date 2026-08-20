@@ -27,7 +27,7 @@ public class AdminVendorController {
 
     @PostMapping
     public VendorSummary create(@RequestBody Map<String, String> body) {
-        return vendorUserService.createVendor(body.get("code"), body.get("name"));
+        return vendorUserService.createVendor(body.get("code"), body.get("name"), body.get("vendorType"));
     }
 }
 

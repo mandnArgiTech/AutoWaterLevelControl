@@ -1072,3 +1072,79 @@ code {
   background: var(--surface-2);
 }
 
+/* ── Registration wizard ───────────────────────────────────────────────── */
+.wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.25rem;
+}
+.wizard-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.wizard-steps li span {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  background: var(--border);
+  color: var(--text);
+  font-size: 0.75rem;
+}
+.wizard-steps li.active {
+  background: var(--accent-soft, #e0f2fe);
+  color: var(--text);
+}
+.wizard-steps li.done span {
+  background: #16a34a;
+  color: #fff;
+}
+.wizard-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1rem;
+}
+.wizard-panel h2 { margin-top: 0; }
+.wizard-list { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+.wizard-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+.wizard-page .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+.wizard-page .field input,
+.wizard-page .field select {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.alert-ok {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+

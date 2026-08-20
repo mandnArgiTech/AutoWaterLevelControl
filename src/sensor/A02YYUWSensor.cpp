@@ -13,6 +13,7 @@ A02YYUWSensor::A02YYUWSensor(int rxPin, int txPin)
     , _parseDataH(0)
     , _parseDataL(0)
     , _cachedDistanceMm(-1.0f)
+    , _lastFrameRawMm(0)
     , _lastFrameMs(0)
     , _frameCount(0)
     , _checksumErrors(0)
@@ -57,15 +58,18 @@ ErrorCode A02YYUWSensor::begin() {
 bool A02YYUWSensor::applyFrame(uint16_t distRawMm) {
     _lastFrameMs = millis();
     _frameCount++;
+    _lastFrameRawMm = distRawMm;
 
-    if (distRawMm <= A02YYUW_MIN_DISTANCE || distRawMm >= A02YYUW_MAX_DISTANCE) {
-        _rangeStatus = (distRawMm <= A02YYUW_MIN_DISTANCE) ? "below_blind" : "above_max";
+    // Accept exact edges 30 mm and 4500 mm (datasheet: 3–450 cm).
+    if (distRawMm < A02YYUW_MIN_DISTANCE || distRawMm > A02YYUW_MAX_DISTANCE) {
+        _rangeStatus = (distRawMm < A02YYUW_MIN_DISTANCE) ? "below_blind" : "above_max";
         _lastError = ErrorCode::ERR_SENSOR_INVALID_DATA;
         _errorCount++;
+        // Keep last good cache; do not treat out-of-range as a usable reading.
         return false;
     }
 
-    _cachedDistanceMm = static_cast<float>(distRawMm) + _calibrationOffset;
+    _cachedDistanceMm = static_cast<float>(distRawMm);  // pure hardware mm — no filter/offset
     _rangeStatus = "ok";
     _readCount++;
     _lastError = ErrorCode::ERR_NONE;
@@ -171,6 +175,9 @@ String A02YYUWSensor::getStatusJson() const {
     doc["txPin"] = _txPin;
     doc["baud"] = A02YYUW_BAUD_RATE;
     doc["rangeStatus"] = _rangeStatus;
+    doc["lastFrameRawMm"] = _lastFrameRawMm;
+    doc["minDistanceMm"] = A02YYUW_MIN_DISTANCE;
+    doc["maxDistanceMm"] = A02YYUW_MAX_DISTANCE;
     doc["frameCount"] = _frameCount;
     doc["checksumErrors"] = _checksumErrors;
     doc["frameAgeMs"] = (_lastFrameMs > 0) ? (millis() - _lastFrameMs) : 0;

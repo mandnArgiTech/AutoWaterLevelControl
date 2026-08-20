@@ -7,6 +7,7 @@
 #include "WiFiManager.h"
 #include "MQTTManager.h"
 #include "../utils/TimeManager.h"
+#include "../utils/HeapMonitor.h"
 #include "../version.h"
 #include <LittleFS.h>
 #ifdef FLM_BATTERY_MONITOR
@@ -19,10 +20,13 @@ void WebServerManager::handleApiStatus() {
 
     // Compact dashboard payload — use cached sensor level only (main loop updates it).
     JsonDocument doc;
-    doc["device"] = ConfigManager::getInstance().getSystemConfig().deviceName;
+    doc["device"] = ConfigManager::getInstance().getMQTTConfig().deviceName;
     doc["firmware"] = Version::getFirmware();
     doc["uptime"] = TimeManager::getInstance().getUptimeString();
-    doc["freeHeap"] = ESP.getFreeHeap();
+    HeapMonitor::sample();
+    doc["freeHeap"] = HeapMonitor::freeHeap();
+    doc["minFreeHeap"] = HeapMonitor::minFreeHeap();
+    doc["maxFreeBlock"] = HeapMonitor::maxFreeBlock();
 
     const WaterLevel& level = _calculator.getLastLevel();
     doc["sensorOk"] = level.sensorOk;
@@ -32,10 +36,14 @@ void WebServerManager::handleApiStatus() {
     levelObj["sensorOk"] = level.sensorOk;
     levelObj["percentFilled"] = roundf(level.percentFilled * 10.0f) / 10.0f;
     levelObj["percentRemaining"] = roundf(level.percentRemaining * 10.0f) / 10.0f;
+    levelObj["waterHeightMm"] = roundf(level.waterHeightMm);
     levelObj["waterHeightCm"] = roundf(level.waterHeightCm * 10.0f) / 10.0f;
     levelObj["volumeLiters"] = roundf(level.volumeLiters * 10.0f) / 10.0f;
     levelObj["volumeRemaining"] = roundf(level.volumeRemaining * 10.0f) / 10.0f;
+    levelObj["distanceMm"] = roundf(level.distanceMm);
     levelObj["distanceCm"] = roundf(level.distanceCm * 10.0f) / 10.0f;
+    levelObj["tankHeightMm"] = ConfigManager::getInstance().getTankConfig().height;
+    levelObj["offsetMm"] = ConfigManager::getInstance().getSensorConfig().offsetMm;
     levelObj["state"] = level.sensorOk && level.valid
         ? TankCalculator::tankStateToString(_calculator.getTankState())
         : "sensor_error";
@@ -49,6 +57,12 @@ void WebServerManager::handleApiStatus() {
     JsonObject connection = doc["connection"].to<JsonObject>();
     connection["wifi"] = WiFiManager::getInstance().isConnected();
     connection["mqtt"] = MQTTManager::getInstance().isConnected();
+    connection["mac"] = WiFiManager::getInstance().getMAC();
+    doc["mac"] = WiFiManager::getInstance().getMAC();
+    {
+        JsonObject mqtt = doc["mqtt"].to<JsonObject>();
+        MQTTManager::getInstance().fillStatus(mqtt);
+    }
 
 #ifdef FLM_BATTERY_MONITOR
     {
@@ -92,8 +106,16 @@ void WebServerManager::handleApiInfo() {
     doc["buildTime"] = Version::getBuildTime();
     doc["device"] = Version::getDeviceType();
     doc["chipId"] = String(ESP.getChipId(), HEX);
+    doc["mac"] = WiFiManager::getInstance().getMAC();
     doc["flashSize"] = ESP.getFlashChipSize();
     doc["sdkVersion"] = ESP.getSdkVersion();
+    {
+        size_t totalBytes = 0, usedBytes = 0;
+        ConfigManager::getInstance().getFilesystemInfo(totalBytes, usedBytes);
+        doc["fsTotal"] = totalBytes;
+        doc["fsUsed"] = usedBytes;
+        doc["fsFree"] = (totalBytes > usedBytes) ? (totalBytes - usedBytes) : 0;
+    }
 
     String output;
     serializeJson(doc, output);
@@ -178,8 +200,12 @@ void WebServerManager::handleApiConfigSectionPost() {
         ConfigManager::getInstance().unlockConfigWrite();
         if (result == ErrorCode::ERR_WEB_REQUEST) {
             sendApiFailure(413, "PAYLOAD_TOO_LARGE", "JSON body exceeds limit");
+        } else if (result == ErrorCode::ERR_CONFIG_PARSE) {
+            sendApiFailure(400, "SECTION_PARSE", "Invalid JSON for section");
+        } else if (result == ErrorCode::ERR_CONFIG_VALIDATE) {
+            sendApiFailure(400, "SECTION_INVALID", "Section values failed validation");
         } else {
-            sendApiFailure(400, "SECTION_INVALID", "Failed to parse or validate section");
+            sendApiFailure(400, "SECTION_INVALID", "Failed to apply section");
         }
         return;
     }
@@ -188,6 +214,11 @@ void WebServerManager::handleApiConfigSectionPost() {
     ConfigManager::getInstance().unlockConfigWrite();
 
     if (result == ErrorCode::ERR_NONE) {
+        if (section == "sensor") {
+            // Apply offset immediately so calibration takes effect without reboot.
+            _sensor.setCalibrationOffset(
+                ConfigManager::getInstance().getSensorConfig().offsetMm);
+        }
         sendSuccess("Section " + section + " saved");
     } else if (result == ErrorCode::ERR_FS_FULL) {
         sendApiFailure(507, "FS_FULL", "Filesystem full");
@@ -212,6 +243,19 @@ void WebServerManager::handleApiMQTTStatus() {
     _requestCount++;
     addCorsHeaders();
     sendJson(200, MQTTManager::getInstance().getStatusJson());
+}
+
+void WebServerManager::handleApiMQTTLog() {
+    _requestCount++;
+    addCorsHeaders();
+    uint16_t limit = MQTT_LOG_CAPACITY;
+    if (_server.hasArg("limit")) {
+        int v = _server.arg("limit").toInt();
+        if (v > 0 && v <= MQTT_LOG_CAPACITY) {
+            limit = (uint16_t)v;
+        }
+    }
+    sendJson(200, MQTTManager::getInstance().getLogJson(limit));
 }
 
 /**
@@ -340,6 +384,126 @@ void WebServerManager::handleApiPumpPost() {
 
     _motor->setMode(IMotorController::modeFromString(state));
     sendSuccess("Pump mode set to " + state);
+}
+
+#include "DistanceCalibratePage.h"
+#include <math.h>
+
+void WebServerManager::handleDistanceCalibratePage() {
+    _requestCount++;
+    _server.send_P(200, "text/html", WEB_PAGE_DISTANCE_CALIBRATE);
+}
+
+void WebServerManager::handleApiDistanceCalibrateGet() {
+    _requestCount++;
+    addCorsHeaders();
+
+    // Ensure UART sensors have fresh frames before sampling raw.
+    _sensor.poll();
+    const float rawMm = _sensor.readRawDistanceMm();
+    const float offsetMm = _sensor.getCalibrationOffset();
+
+    JsonDocument doc;
+    const bool ok = (rawMm > 0.f);
+    doc["ok"] = ok;
+    doc["rawMm"] = ok ? roundf(rawMm) : (float)-1;
+    doc["offsetMm"] = roundf(offsetMm * 10.f) / 10.f;
+    doc["calibratedMm"] = ok ? roundf(rawMm + offsetMm) : (float)-1;
+    doc["tankHeightMm"] = ConfigManager::getInstance().getTankConfig().height;
+    doc["filtered"] = false;
+    doc["sensor"] = _sensor.getSensorTypeName();
+
+    String output;
+    serializeJson(doc, output);
+    sendJson(200, output);
+}
+
+void WebServerManager::handleApiDistanceCalibratePost() {
+    _requestCount++;
+    addCorsHeaders();
+
+    if (!_server.hasArg("plain")) {
+        sendApiFailure(400, "NO_BODY", "No body provided");
+        return;
+    }
+
+    JsonDocument body;
+    if (deserializeJson(body, _server.arg("plain"))) {
+        sendApiFailure(400, "BAD_JSON", "Invalid JSON");
+        return;
+    }
+
+    _sensor.poll();
+    const float rawMm = _sensor.readRawDistanceMm();
+    float newOffset = 0.f;
+    float measuredMm = NAN;
+
+    if (!body["offsetMm"].isNull()) {
+        // Explicit offset (e.g. reset to 0)
+        newOffset = body["offsetMm"].as<float>();
+    } else if (!body["measuredMm"].isNull()) {
+        measuredMm = body["measuredMm"].as<float>();
+        if (!(measuredMm > 0.f) || measuredMm > 30000.f) {
+            sendApiFailure(400, "BAD_MEASURE", "measuredMm must be between 1 and 30000");
+            return;
+        }
+        if (!(rawMm > 0.f)) {
+            sendApiFailure(503, "NO_RAW", "No raw sensor reading — wait for a stable distance");
+            return;
+        }
+        // Tape = raw + offset  →  offset = tape − raw
+        newOffset = measuredMm - rawMm;
+    } else {
+        sendApiFailure(400, "MISSING", "Provide measuredMm (tape) or offsetMm");
+        return;
+    }
+
+    if (newOffset < -2000.f || newOffset > 2000.f) {
+        sendApiFailure(400, "OFFSET_RANGE", "Computed offset out of range (±2000 mm) — check tape/raw units");
+        return;
+    }
+
+    if (!ConfigManager::getInstance().tryLockForConfigWrite()) {
+        sendApiFailure(503, "CONFIG_LOCKED", "Configuration write in progress; retry shortly");
+        return;
+    }
+
+    JsonDocument section;
+    section["offsetMm"] = newOffset;
+    String sectionJson;
+    serializeJson(section, sectionJson);
+
+    ErrorCode result = ConfigManager::getInstance().updateSection("sensor", sectionJson);
+    if (result != ErrorCode::ERR_NONE) {
+        ConfigManager::getInstance().unlockConfigWrite();
+        sendApiFailure(400, "SECTION_INVALID", "Failed to apply offset");
+        return;
+    }
+
+    result = ConfigManager::getInstance().saveConfig();
+    ConfigManager::getInstance().unlockConfigWrite();
+
+    if (result != ErrorCode::ERR_NONE) {
+        if (result == ErrorCode::ERR_FS_FULL) {
+            sendApiFailure(507, "FS_FULL", "Filesystem full");
+        } else {
+            sendApiFailure(500, "CONFIG_SAVE", "Failed to save");
+        }
+        return;
+    }
+
+    _sensor.setCalibrationOffset(newOffset);
+
+    JsonDocument doc;
+    doc["success"] = true;
+    doc["message"] = "Distance calibration saved";
+    doc["rawMm"] = (rawMm > 0.f) ? roundf(rawMm) : (float)-1;
+    doc["measuredMm"] = !isnan(measuredMm) ? roundf(measuredMm) : (float)-1;
+    doc["offsetMm"] = roundf(newOffset * 10.f) / 10.f;
+    doc["calibratedMm"] = (rawMm > 0.f) ? roundf(rawMm + newOffset) : (float)-1;
+    String output;
+    serializeJson(doc, output);
+    sendJson(200, output);
 }
 
 #ifdef FLM_BATTERY_MONITOR

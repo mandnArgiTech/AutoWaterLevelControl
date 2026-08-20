@@ -2,8 +2,11 @@ package com.flm.platform.api;
 
 import com.flm.platform.admin.service.RbacService;
 import com.flm.platform.common.UserRole;
+import com.flm.platform.common.VendorType;
 import com.flm.platform.domain.PlatformUser;
 import com.flm.platform.domain.PlatformUserRepository;
+import com.flm.platform.domain.Site;
+import com.flm.platform.domain.SiteRepository;
 import com.flm.platform.domain.Vendor;
 import com.flm.platform.domain.VendorRepository;
 import org.slf4j.Logger;
@@ -23,6 +26,7 @@ public class DataSeeder {
     CommandLineRunner seed(
         @Value("${flm.seed.enabled:true}") boolean enabled,
         VendorRepository vendorRepository,
+        SiteRepository siteRepository,
         PlatformUserRepository userRepository,
         PasswordEncoder passwordEncoder,
         RbacService rbacService
@@ -36,8 +40,23 @@ public class DataSeeder {
                 Vendor v = new Vendor();
                 v.setCode("demo");
                 v.setName("Demo Water Solutions");
+                v.setVendorType(VendorType.HOUSEHOLD);
                 return vendorRepository.save(v);
             });
+            if (demo.getVendorType() == null) {
+                demo.setVendorType(VendorType.HOUSEHOLD);
+                vendorRepository.save(demo);
+            }
+
+            if (siteRepository.findByVendorIdOrderByNameAsc(demo.getId()).isEmpty()) {
+                Site home = new Site();
+                home.setVendor(demo);
+                home.setName("Example Home");
+                home.setKind("HOME");
+                home.setAddress("Demo street");
+                siteRepository.save(home);
+                log.info("Seeded example site for vendor demo");
+            }
 
             seedUser(userRepository, passwordEncoder, rbacService, "admin", "Platform Admin", UserRole.SUPER_ADMIN, null);
             seedUser(userRepository, passwordEncoder, rbacService, "vendor", "Demo Vendor Admin", UserRole.VENDOR_ADMIN, demo);

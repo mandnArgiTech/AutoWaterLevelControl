@@ -69,9 +69,9 @@
 
 // Sensor defaults
 #define DEFAULT_SENSOR_TYPE         "A02YYUW"  // DYP-A02YYUW default level sensor
-#define DEFAULT_SENSOR_OFFSET       50.0f    // Distance from sensor to full tank (mm)
-#define DEFAULT_SENSOR_MIN_DISTANCE 280.0f   // A02YYUW blind zone (mm)
-#define DEFAULT_SENSOR_MAX_DISTANCE 7500.0f  // A02YYUW max range (mm)
+#define DEFAULT_SENSOR_OFFSET       0.0f     // Additive trim on distance (mm); 0 = use raw
+#define DEFAULT_SENSOR_MIN_DISTANCE 30.0f    // A02YYUW blind zone (mm) — SEN0311: 3 cm
+#define DEFAULT_SENSOR_MAX_DISTANCE 4500.0f  // A02YYUW max range (mm) — SEN0311: 450 cm
 #define DEFAULT_SENSOR_SAMPLES      5        // Number of samples for averaging
 #define DEFAULT_SENSOR_INTERVAL     2000     // ms between readings
 
@@ -85,12 +85,12 @@
 #define DEFAULT_INVERTED_LOGIC      false    // Normal logic (HIGH = detected)
 
 // Filter defaults for fluid surface stability
-#define DEFAULT_FILTER_ENABLED      true     // Enable filtering by default
-#define DEFAULT_MEDIAN_FILTER_SIZE  5        // Median filter removes spikes
-#define DEFAULT_MOVING_AVG_WINDOW   10       // Moving average smooths ripples
+#define DEFAULT_FILTER_ENABLED      false    // Raw distance — no median / moving-avg / Kalman
+#define DEFAULT_MEDIAN_FILTER_SIZE  5        // Unused when filterEnabled=false
+#define DEFAULT_MOVING_AVG_WINDOW   10       // Unused when filterEnabled=false
 
 // Kalman filter defaults
-#define DEFAULT_KALMAN_ENABLED      true     // Enable Kalman filter by default
+#define DEFAULT_KALMAN_ENABLED      false    // Disabled — use raw readings
 #define DEFAULT_KALMAN_PROCESS_Q    0.01f    // Process noise (lower = smoother)
 #define DEFAULT_KALMAN_MEASURE_R    0.1f     // Measurement noise (higher = more filtering)
 
@@ -212,7 +212,7 @@ struct SensorConfig {
     SensorHWConfig hardware;    ///< Hardware/pin configuration
     
     // Calibration
-    float offsetMm;             ///< Distance from sensor to full tank level (mm)
+    float offsetMm;             ///< Additive calibration trim applied to sensor distance (mm)
     float minDistance;          ///< Minimum valid distance (mm)
     float maxDistance;          ///< Maximum valid distance (mm)
     uint8_t samples;            ///< Number of samples for averaging

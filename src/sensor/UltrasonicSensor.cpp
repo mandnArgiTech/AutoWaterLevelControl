@@ -69,7 +69,7 @@ float UltrasonicSensor::readRawDistanceMm() {
 
     uint8_t hi = _serial->read();
     uint8_t lo = _serial->read();
-    float distance = (hi * 256.0f) + lo + _calibrationOffset;
+    float distance = (hi * 256.0f) + lo;
 
     if (!validateDistance(distance)) {
         _errorCount++;

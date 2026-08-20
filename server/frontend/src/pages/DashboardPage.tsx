@@ -14,6 +14,7 @@ import type { DeviceSummary } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import TankGauge from '../components/TankGauge';
 import { useIsMobile } from '../hooks/useMediaQuery';
+import { landingProfile } from '../config/vendorLanding';
 
 function StatCard({ label, value, hint, tone = 'blue' }: {
   label: string;
@@ -188,15 +189,16 @@ export default function DashboardPage() {
   const selected = devices.find((d) => d.id === activeId);
   const canCommand = user?.role !== 'VIEWER';
   const chartHeight = isMobile ? 260 : 360;
+  const profile = landingProfile(user?.vendorType);
 
   return (
     <div className="page dashboard-page">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Live monitoring</p>
-          <h1>Water Level Dashboard</h1>
+          <p className="eyebrow">{profile.eyebrow}</p>
+          <h1>{profile.title}</h1>
           <p className="page-lead">
-            Real-time tank levels from your connected devices
+            {profile.lead}
             {user?.vendorName ? ` — ${user.vendorName}` : ''}
           </p>
         </div>
@@ -211,9 +213,9 @@ export default function DashboardPage() {
       </header>
 
       <section className="stats-row">
-        <StatCard label="Total tanks" value={String(devices.length)} hint="Registered devices" tone="blue" />
+        <StatCard label={profile.tankLabel} value={String(devices.length)} hint="Registered devices" tone="blue" />
         <StatCard label="Online now" value={String(onlineCount)} hint={`${devices.length - onlineCount} offline`} tone="green" />
-        <StatCard label="Average fill" value={`${avgFill.toFixed(1)}%`} hint="Across all tanks" tone="amber" />
+        <StatCard label={profile.avgLabel} value={`${avgFill.toFixed(1)}%`} hint="Across all tanks" tone="amber" />
       </section>
 
       {isLoading && <div className="loading-panel">Loading live data…</div>}

@@ -7,6 +7,7 @@ import type { PermissionKey } from '../api/types';
 
 const NAV_ICONS: Record<string, string> = {
   '/': '📊',
+  '/setup': '🪄',
   '/reports': '📈',
   '/users': '👥',
   '/admin/vendors': '🏢',
@@ -28,6 +29,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const mainNav: NavItem[] = [
     { to: '/', label: 'Dashboard' },
+    { to: '/setup', label: 'Setup' },
     { to: '/reports', label: 'Reports' },
     ...(user?.role === 'VENDOR_ADMIN' || user?.role === 'SUPER_ADMIN'
       ? [{ to: '/users', label: 'Users' }]

@@ -12,8 +12,8 @@
 
 #define A02YYUW_HEADER           0xFF
 #define A02YYUW_BAUD_RATE        9600
-#define A02YYUW_MIN_DISTANCE     280     ///< mm blind zone (DYP-A02YYUW)
-#define A02YYUW_MAX_DISTANCE     7500    ///< mm
+#define A02YYUW_MIN_DISTANCE     30      ///< mm blind zone (SEN0311 / DYP-A02YYUW: 3 cm)
+#define A02YYUW_MAX_DISTANCE     4500    ///< mm max range (SEN0311: 450 cm)
 #define A02YYUW_FRAME_STALE_MS   3000u
 #define DEFAULT_A02YYUW_RX_PIN   14      ///< D5 / GPIO14 (sensor TX -> ESP RX)
 #define DEFAULT_A02YYUW_TX_PIN   12      ///< D6 / GPIO12 (sensor RX <- ESP TX)
@@ -60,6 +60,7 @@ private:
     uint8_t _parseDataL;
 
     float _cachedDistanceMm;
+    uint16_t _lastFrameRawMm;   ///< Last decoded frame (even if rejected)
     unsigned long _lastFrameMs;
     uint32_t _frameCount;
     uint32_t _checksumErrors;

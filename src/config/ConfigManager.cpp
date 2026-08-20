@@ -504,32 +504,23 @@ void ConfigManager::applyNumericClamps() {
 
 ErrorCode ConfigManager::validateConfig() {
     applyNumericClamps();
-    bool hasWarnings = false;
-    
-    // Validate tank dimensions
-    if (_tankConfig.height <= 0 || _tankConfig.height > 10000) {
-        FLM_LOG_WARN("Cfg", "invalid tank height");
-        hasWarnings = true;
+
+    // Calibration offset (mm): allow small negative trim; clamp extreme values only.
+    if (_sensorConfig.offsetMm < -500.f) {
+        FLM_LOG_WARN("Cfg", "sensor offset clamped from %.1f to -500", _sensorConfig.offsetMm);
+        _sensorConfig.offsetMm = -500.f;
     }
-    
-    if (_tankConfig.type == "circular" && (_tankConfig.diameter <= 0 || _tankConfig.diameter > 10000)) {
-        FLM_LOG_WARN("Cfg", "invalid tank diameter");
-        hasWarnings = true;
+    if (_sensorConfig.offsetMm > _tankConfig.height) {
+        FLM_LOG_WARN("Cfg", "sensor offset clamped to tank height");
+        _sensorConfig.offsetMm = _tankConfig.height;
     }
-    
-    // Validate sensor config
-    if (_sensorConfig.offsetMm < 0 || _sensorConfig.offsetMm > _tankConfig.height) {
-        FLM_LOG_WARN("Cfg", "sensor offset out of range");
-        hasWarnings = true;
+
+    // Single device identity: mqtt.deviceName is canonical; keep system in sync.
+    if (_mqttConfig.deviceName.length() > 0) {
+        _systemConfig.deviceName = _mqttConfig.deviceName;
     }
-    
-    // Recalculate tank volume
+
     _tankConfig.volumeLiters = calculateTankVolume();
-    
-    if (hasWarnings) {
-        return ErrorCode::ERR_CONFIG_VALIDATE;
-    }
-    
     return ErrorCode::ERR_NONE;
 }
 
@@ -538,107 +529,146 @@ ErrorCode ConfigManager::validateConfig() {
 // =============================================================================
 
 void ConfigManager::parseWiFiConfig(const JsonObject& obj) {
-    _wifiConfig.ssid = obj["ssid"] | DEFAULT_WIFI_SSID;
-    _wifiConfig.password = obj["password"] | DEFAULT_WIFI_PASSWORD;
-    _wifiConfig.hostname = obj["hostname"] | DEFAULT_WIFI_HOSTNAME;
-    _wifiConfig.apSsid = obj["apSsid"] | DEFAULT_WIFI_AP_SSID;
-    _wifiConfig.apPassword = obj["apPassword"] | DEFAULT_WIFI_AP_PASSWORD;
-    _wifiConfig.connectTimeout = obj["connectTimeout"] | DEFAULT_WIFI_CONNECT_TIMEOUT;
-    _wifiConfig.apMode = obj["apMode"] | false;
+    if (!obj["ssid"].isNull()) _wifiConfig.ssid = obj["ssid"].as<String>();
+    if (!obj["password"].isNull()) _wifiConfig.password = obj["password"].as<String>();
+    if (!obj["hostname"].isNull()) _wifiConfig.hostname = obj["hostname"].as<String>();
+    if (!obj["apSsid"].isNull()) _wifiConfig.apSsid = obj["apSsid"].as<String>();
+    if (!obj["apPassword"].isNull()) _wifiConfig.apPassword = obj["apPassword"].as<String>();
+    if (!obj["connectTimeout"].isNull()) {
+        _wifiConfig.connectTimeout = obj["connectTimeout"].as<unsigned long>();
+    }
+    if (!obj["apMode"].isNull()) _wifiConfig.apMode = obj["apMode"].as<bool>();
 }
 
 void ConfigManager::parseMQTTConfig(const JsonObject& obj) {
-    _mqttConfig.enabled = obj["enabled"] | DEFAULT_MQTT_ENABLED;
-    _mqttConfig.server = obj["server"] | DEFAULT_MQTT_SERVER;
-    _mqttConfig.port = obj["port"] | DEFAULT_MQTT_PORT;
-    _mqttConfig.username = obj["username"] | DEFAULT_MQTT_USER;
-    _mqttConfig.password = obj["password"] | DEFAULT_MQTT_PASSWORD;
-    _mqttConfig.clientId = obj["clientId"] | DEFAULT_MQTT_CLIENT_ID;
-    _mqttConfig.deviceName = obj["deviceName"] | DEFAULT_MQTT_DEVICE_NAME;
-    _mqttConfig.topicPrefix = obj["topicPrefix"] | DEFAULT_MQTT_TOPIC_PREFIX;
-    _mqttConfig.publishInterval = obj["publishInterval"] | DEFAULT_MQTT_PUBLISH_INTERVAL;
-    _mqttConfig.tls = obj["tls"] | DEFAULT_MQTT_TLS;
-    _mqttConfig.tlsMode = obj["tlsMode"] | DEFAULT_MQTT_TLS_MODE;
-    _mqttConfig.fingerprint = obj["fingerprint"] | DEFAULT_MQTT_FINGERPRINT;
+    // Merge: UI posts a subset; do not wipe TLS / clientId when omitted.
+    if (!obj["enabled"].isNull()) _mqttConfig.enabled = obj["enabled"].as<bool>();
+    if (!obj["server"].isNull()) _mqttConfig.server = obj["server"].as<String>();
+    if (!obj["port"].isNull()) _mqttConfig.port = obj["port"].as<uint16_t>();
+    if (!obj["username"].isNull()) _mqttConfig.username = obj["username"].as<String>();
+    if (!obj["password"].isNull()) _mqttConfig.password = obj["password"].as<String>();
+    if (!obj["clientId"].isNull()) _mqttConfig.clientId = obj["clientId"].as<String>();
+    if (!obj["deviceName"].isNull()) {
+        _mqttConfig.deviceName = obj["deviceName"].as<String>();
+        _systemConfig.deviceName = _mqttConfig.deviceName;  // one identity across app
+    }
+    if (!obj["topicPrefix"].isNull()) _mqttConfig.topicPrefix = obj["topicPrefix"].as<String>();
+    if (!obj["publishInterval"].isNull()) {
+        _mqttConfig.publishInterval = obj["publishInterval"].as<unsigned long>();
+    }
+    if (!obj["tls"].isNull()) _mqttConfig.tls = obj["tls"].as<bool>();
+    if (!obj["tlsMode"].isNull()) _mqttConfig.tlsMode = obj["tlsMode"].as<String>();
+    if (!obj["fingerprint"].isNull()) _mqttConfig.fingerprint = obj["fingerprint"].as<String>();
 }
 
 void ConfigManager::parseTankConfig(const JsonObject& obj) {
-    _tankConfig.type = obj["type"] | DEFAULT_TANK_TYPE;
-    _tankConfig.diameter = obj["diameter"] | DEFAULT_TANK_DIAMETER;
-    _tankConfig.length = obj["length"] | 0.0f;
-    _tankConfig.width = obj["width"] | 0.0f;
-    _tankConfig.height = obj["height"] | DEFAULT_TANK_HEIGHT;
-    _tankConfig.volumeLiters = obj["volumeLiters"] | 0.0f;
-    
-    // Recalculate volume if not provided
+    if (!obj["type"].isNull()) {
+        _tankConfig.type = obj["type"].as<String>();
+    }
+    if (!obj["diameter"].isNull()) {
+        _tankConfig.diameter = obj["diameter"].as<float>();
+    }
+    if (!obj["length"].isNull()) {
+        _tankConfig.length = obj["length"].as<float>();
+    }
+    if (!obj["width"].isNull()) {
+        _tankConfig.width = obj["width"].as<float>();
+    }
+    if (!obj["height"].isNull()) {
+        _tankConfig.height = obj["height"].as<float>();
+    }
+    if (!obj["volumeLiters"].isNull()) {
+        _tankConfig.volumeLiters = obj["volumeLiters"].as<float>();
+    } else {
+        _tankConfig.volumeLiters = 0.0f;
+    }
+
     if (_tankConfig.volumeLiters == 0) {
         _tankConfig.volumeLiters = calculateTankVolume();
     }
+
+    // Keep sensor geometry in sync so level % uses the same tank height.
+    _sensorConfig.hardware.tankHeightMm = _tankConfig.height;
 }
 
 void ConfigManager::parseSensorConfig(const JsonObject& obj) {
-    // Hardware configuration
+    // Merge: UI posts calibration only — never reset hardware/filters when omitted.
     if (obj["hardware"].is<JsonObject>()) {
         JsonObject hw = obj["hardware"];
-        _sensorConfig.hardware.type = hw["type"] | DEFAULT_SENSOR_TYPE;
-        _sensorConfig.hardware.rxPin = hw["rxPin"] | DEFAULT_RX_PIN;
-        _sensorConfig.hardware.txPin = hw["txPin"] | DEFAULT_TX_PIN;
-        _sensorConfig.hardware.trigPin = hw["trigPin"] | DEFAULT_TRIG_PIN;
-        _sensorConfig.hardware.echoPin = hw["echoPin"] | DEFAULT_ECHO_PIN;
-        _sensorConfig.hardware.signalPin = hw["signalPin"] | DEFAULT_SIGNAL_PIN;
-        _sensorConfig.hardware.mountHeightMm = hw["mountHeightMm"] | DEFAULT_MOUNT_HEIGHT_MM;
-        _sensorConfig.hardware.tankHeightMm = hw["tankHeightMm"] | DEFAULT_TANK_HEIGHT;
-        _sensorConfig.hardware.invertedLogic = hw["invertedLogic"] | DEFAULT_INVERTED_LOGIC;
-    } else {
-        // Legacy format - use top-level type field if present
-        _sensorConfig.hardware.type = obj["type"] | DEFAULT_SENSOR_TYPE;
-        _sensorConfig.hardware.rxPin = DEFAULT_RX_PIN;
-        _sensorConfig.hardware.txPin = DEFAULT_TX_PIN;
-        _sensorConfig.hardware.trigPin = DEFAULT_TRIG_PIN;
-        _sensorConfig.hardware.echoPin = DEFAULT_ECHO_PIN;
-        _sensorConfig.hardware.signalPin = DEFAULT_SIGNAL_PIN;
-        _sensorConfig.hardware.mountHeightMm = DEFAULT_MOUNT_HEIGHT_MM;
-        _sensorConfig.hardware.tankHeightMm = DEFAULT_TANK_HEIGHT;
-        _sensorConfig.hardware.invertedLogic = DEFAULT_INVERTED_LOGIC;
+        if (!hw["type"].isNull()) _sensorConfig.hardware.type = hw["type"].as<String>();
+        if (!hw["rxPin"].isNull()) _sensorConfig.hardware.rxPin = hw["rxPin"].as<uint8_t>();
+        if (!hw["txPin"].isNull()) _sensorConfig.hardware.txPin = hw["txPin"].as<uint8_t>();
+        if (!hw["trigPin"].isNull()) _sensorConfig.hardware.trigPin = hw["trigPin"].as<uint8_t>();
+        if (!hw["echoPin"].isNull()) _sensorConfig.hardware.echoPin = hw["echoPin"].as<uint8_t>();
+        if (!hw["signalPin"].isNull()) _sensorConfig.hardware.signalPin = hw["signalPin"].as<uint8_t>();
+        if (!hw["mountHeightMm"].isNull()) {
+            _sensorConfig.hardware.mountHeightMm = hw["mountHeightMm"].as<float>();
+        }
+        if (!hw["tankHeightMm"].isNull()) {
+            _sensorConfig.hardware.tankHeightMm = hw["tankHeightMm"].as<float>();
+        }
+        if (!hw["invertedLogic"].isNull()) {
+            _sensorConfig.hardware.invertedLogic = hw["invertedLogic"].as<bool>();
+        }
+    } else if (!obj["type"].isNull()) {
+        // Legacy top-level type only — leave pins/heights alone.
+        _sensorConfig.hardware.type = obj["type"].as<String>();
     }
-    
-    // Calibration settings
-    _sensorConfig.offsetMm = obj["offsetMm"] | DEFAULT_SENSOR_OFFSET;
-    _sensorConfig.minDistance = obj["minDistance"] | DEFAULT_SENSOR_MIN_DISTANCE;
-    _sensorConfig.maxDistance = obj["maxDistance"] | DEFAULT_SENSOR_MAX_DISTANCE;
-    _sensorConfig.samples = obj["samples"] | DEFAULT_SENSOR_SAMPLES;
-    _sensorConfig.readInterval = obj["readInterval"] | DEFAULT_SENSOR_INTERVAL;
-    
-    // Filter settings
-    _sensorConfig.filterEnabled = obj["filterEnabled"] | DEFAULT_FILTER_ENABLED;
-    _sensorConfig.medianFilterSize = obj["medianFilterSize"] | DEFAULT_MEDIAN_FILTER_SIZE;
-    _sensorConfig.movingAvgWindow = obj["movingAvgWindow"] | DEFAULT_MOVING_AVG_WINDOW;
-    
-    // Kalman filter settings
-    _sensorConfig.kalmanEnabled = obj["kalmanEnabled"] | DEFAULT_KALMAN_ENABLED;
-    _sensorConfig.kalmanProcessNoise = obj["kalmanProcessNoise"] | DEFAULT_KALMAN_PROCESS_Q;
-    _sensorConfig.kalmanMeasureNoise = obj["kalmanMeasureNoise"] | DEFAULT_KALMAN_MEASURE_R;
+
+    if (!obj["offsetMm"].isNull()) _sensorConfig.offsetMm = obj["offsetMm"].as<float>();
+    if (!obj["minDistance"].isNull()) _sensorConfig.minDistance = obj["minDistance"].as<float>();
+    if (!obj["maxDistance"].isNull()) _sensorConfig.maxDistance = obj["maxDistance"].as<float>();
+    if (!obj["samples"].isNull()) _sensorConfig.samples = obj["samples"].as<uint8_t>();
+    if (!obj["readInterval"].isNull()) {
+        _sensorConfig.readInterval = obj["readInterval"].as<unsigned long>();
+    }
+
+    if (!obj["filterEnabled"].isNull()) {
+        _sensorConfig.filterEnabled = obj["filterEnabled"].as<bool>();
+    }
+    if (!obj["medianFilterSize"].isNull()) {
+        _sensorConfig.medianFilterSize = obj["medianFilterSize"].as<uint8_t>();
+    }
+    if (!obj["movingAvgWindow"].isNull()) {
+        _sensorConfig.movingAvgWindow = obj["movingAvgWindow"].as<uint8_t>();
+    }
+
+    if (!obj["kalmanEnabled"].isNull()) {
+        _sensorConfig.kalmanEnabled = obj["kalmanEnabled"].as<bool>();
+    }
+    if (!obj["kalmanProcessNoise"].isNull()) {
+        _sensorConfig.kalmanProcessNoise = obj["kalmanProcessNoise"].as<float>();
+    }
+    if (!obj["kalmanMeasureNoise"].isNull()) {
+        _sensorConfig.kalmanMeasureNoise = obj["kalmanMeasureNoise"].as<float>();
+    }
 
     if (obj["ambient"].is<JsonObject>()) {
         JsonObject amb = obj["ambient"];
-        _sensorConfig.ambient.enabled = amb["enabled"] | DEFAULT_AMBIENT_ENABLED;
-        _sensorConfig.ambient.type = amb["type"] | DEFAULT_AMBIENT_TYPE;
-        _sensorConfig.ambient.pin = amb["pin"] | DEFAULT_DHT11_PIN;
-        _sensorConfig.ambient.readIntervalMs = amb["readIntervalMs"] | DEFAULT_DHT11_READ_INTERVAL;
+        if (!amb["enabled"].isNull()) _sensorConfig.ambient.enabled = amb["enabled"].as<bool>();
+        if (!amb["type"].isNull()) _sensorConfig.ambient.type = amb["type"].as<String>();
+        if (!amb["pin"].isNull()) _sensorConfig.ambient.pin = amb["pin"].as<uint8_t>();
+        if (!amb["readIntervalMs"].isNull()) {
+            _sensorConfig.ambient.readIntervalMs = amb["readIntervalMs"].as<uint32_t>();
+        }
     } else {
-        _sensorConfig.ambient.enabled = obj["dht11Enabled"] | DEFAULT_AMBIENT_ENABLED;
-        _sensorConfig.ambient.type = DEFAULT_AMBIENT_TYPE;
-        _sensorConfig.ambient.pin = obj["dht11Pin"] | DEFAULT_DHT11_PIN;
-        _sensorConfig.ambient.readIntervalMs = DEFAULT_DHT11_READ_INTERVAL;
+        if (!obj["dht11Enabled"].isNull()) {
+            _sensorConfig.ambient.enabled = obj["dht11Enabled"].as<bool>();
+        }
+        if (!obj["dht11Pin"].isNull()) {
+            _sensorConfig.ambient.pin = obj["dht11Pin"].as<uint8_t>();
+        }
     }
 }
 
 void ConfigManager::parseSystemConfig(const JsonObject& obj) {
-    _systemConfig.deviceName = obj["deviceName"] | DEFAULT_DEVICE_NAME;
-    _systemConfig.timezoneOffset = obj["timezoneOffset"] | DEFAULT_TIMEZONE_OFFSET;
-    _systemConfig.ntpServer = obj["ntpServer"] | DEFAULT_NTP_SERVER;
-    _systemConfig.webPort = obj["webPort"] | DEFAULT_WEB_PORT;
-    _systemConfig.debugEnabled = obj["debugEnabled"] | DEFAULT_DEBUG_ENABLED;
+    // deviceName is owned by mqtt — ignore system.deviceName on section updates from UI.
+    if (!obj["timezoneOffset"].isNull()) {
+        _systemConfig.timezoneOffset = obj["timezoneOffset"].as<long>();
+    }
+    if (!obj["ntpServer"].isNull()) _systemConfig.ntpServer = obj["ntpServer"].as<String>();
+    if (!obj["webPort"].isNull()) _systemConfig.webPort = obj["webPort"].as<uint16_t>();
+    if (!obj["debugEnabled"].isNull()) _systemConfig.debugEnabled = obj["debugEnabled"].as<bool>();
 }
 
 void ConfigManager::parseBatteryConfig(const JsonObject& obj) {

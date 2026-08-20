@@ -27,6 +27,23 @@
 // PubSubClient defines MQTT_KEEPALIVE (15s) before this header can, so use our own name
 #define FLM_MQTT_KEEPALIVE_S    60
 
+/** Ring buffer for web MQTT console (TX + RX). Sized for ESP8266 heap. */
+#define MQTT_LOG_CAPACITY       24
+#define MQTT_LOG_TOPIC_LEN      32
+#define MQTT_LOG_PAYLOAD_LEN    40
+
+struct MqttLogEntry {
+    uint32_t ms;
+    char dir;   ///< 'T' = publish (TX), 'R' = received (RX)
+    bool ok;
+    char topic[MQTT_LOG_TOPIC_LEN];
+    char payload[MQTT_LOG_PAYLOAD_LEN];
+};
+
+// Guard against the build-165 OOM: a 200-entry ring (~16 KB) left ~3 KB free heap.
+static_assert(sizeof(MqttLogEntry) * MQTT_LOG_CAPACITY <= 4096,
+              "MQTT log ring buffer exceeds RAM budget — reduce MQTT_LOG_CAPACITY");
+
 // ---------------------------------------------------------------------------
 // TLS (BearSSL) tuning for ESP8266.
 //
@@ -72,6 +89,8 @@ public:
     bool publishWaterLevel(const String& json);
     bool publish(const String& subtopic, const String& payload, bool retained = false);
     bool publishStatus();
+    /** Retained birth message on {deviceTag}/system/announce (not under topicPrefix). */
+    bool publishAnnounce();
     bool subscribe(const String& subtopic);
 
     void setMessageCallback(MQTTMessageCallback callback);
@@ -81,6 +100,9 @@ public:
     String getDeviceTag() const { return _deviceTag; }
 
     String getStatusJson();
+    void fillStatus(JsonObject obj);
+    /** Newest-first JSON log: { count, messages:[{ms,dir,ok,topic,payload},...] } */
+    String getLogJson(uint16_t limit = MQTT_LOG_CAPACITY) const;
     static String stateToString(MQTTState state);
 
 private:
@@ -93,6 +115,8 @@ private:
     void setState(MQTTState newState);
     void checkConnection();
     void buildDeviceTag();
+    void appendLog(char dir, bool ok, const String& topic, const String& payload);
+    static void copyTrunc(char* dst, size_t dstLen, const String& src);
     /** Create + configure the TLS client per config. Returns false on fatal config error. */
     bool setupTls(const MQTTConfig& config);
     /** Tear down TLS client objects (reclaim heap after a failed handshake). */
@@ -121,6 +145,15 @@ private:
     uint32_t _reconnectDelayMs;
     uint32_t _publishCount;
     uint32_t _publishErrors;
+
+    bool _lastPublishOk;
+    uint32_t _lastPublishMs;
+    char _lastPublishTopic[MQTT_LOG_TOPIC_LEN];
+    char _lastPublishPayload[MQTT_LOG_PAYLOAD_LEN];
+
+    MqttLogEntry _log[MQTT_LOG_CAPACITY];
+    uint16_t _logHead;   ///< next write index
+    uint16_t _logCount;
 
     static MQTTManager* _instance;
 };

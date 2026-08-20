@@ -435,8 +435,69 @@ postgres_install() {
   fi
 }
 
+postgres_backup() {
+  # Skip when FLM_SKIP_BACKUP=1 (CI / intentional wipe without dump).
+  if [[ "${FLM_SKIP_BACKUP:-}" == "1" ]]; then
+    log_info "FLM_SKIP_BACKUP=1 — skipping database backup"
+    return 0
+  fi
+
+  ensure_env_file
+  local backup_dir="$SERVER_ROOT/backups"
+  mkdir -p "$backup_dir"
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  local out="$backup_dir/${POSTGRES_DB:-flmDB}-${stamp}.sql.gz"
+  local user="${POSTGRES_USER:-flmAdmin}"
+  local db="${POSTGRES_DB:-flmDB}"
+  local port="${POSTGRES_PORT:-5432}"
+
+  log_info "Backing up database to $out"
+
+  if [[ "${FLM_DEPLOY_MODE:-standalone}" == "standalone" ]]; then
+    local pg_dump_bin
+    if ! pg_dump_bin="$(_pg_find_bin pg_dump)"; then
+      log_warn "pg_dump not found — cannot backup native cluster"
+      return 1
+    fi
+    export PGPASSWORD="${POSTGRES_PASSWORD:-flmPass}"
+    if "$pg_dump_bin" -h localhost -p "$port" -U "$user" -d "$db" --no-owner --no-acl 2>>"$FLM_LOG_FILE" \
+        | gzip -c > "$out"; then
+      unset PGPASSWORD
+      log_ok "Backup written: $out ($(du -h "$out" | awk '{print $1}'))"
+      return 0
+    fi
+    unset PGPASSWORD
+    rm -f "$out"
+    log_warn "Native pg_dump failed (DB may be down)"
+    return 1
+  fi
+
+  # Docker: prefer flm-postgres container name, fall back to project service.
+  local cid=""
+  cid="$(docker ps -q --filter name=flm-postgres 2>/dev/null | head -1)"
+  if [[ -z "$cid" ]]; then
+    cid="$(docker ps -q --filter name=postgres 2>/dev/null | head -1)"
+  fi
+  if [[ -z "$cid" ]]; then
+    log_warn "No running Postgres container — cannot backup"
+    return 1
+  fi
+  if docker exec "$cid" pg_dump -U "$user" -d "$db" --no-owner --no-acl 2>>"$FLM_LOG_FILE" \
+      | gzip -c > "$out"; then
+    log_ok "Backup written: $out ($(du -h "$out" | awk '{print $1}'))"
+    return 0
+  fi
+  rm -f "$out"
+  log_warn "Docker pg_dump failed"
+  return 1
+}
+
 postgres_uninstall() {
   ensure_env_file
+  # Always attempt a dump before any destructive step (skip with FLM_SKIP_BACKUP=1).
+  postgres_backup || log_warn "Proceeding with uninstall without a successful backup"
+
   if [[ "${FLM_DEPLOY_MODE:-standalone}" == "standalone" ]]; then
     log_header "Uninstalling Database (PostgreSQL — native)"
     postgres_stop

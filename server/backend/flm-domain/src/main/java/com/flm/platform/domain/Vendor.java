@@ -1,5 +1,6 @@
 package com.flm.platform.domain;
 
+import com.flm.platform.common.VendorType;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
@@ -18,6 +19,10 @@ public class Vendor {
     @Column(nullable = false)
     private String name;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "vendor_type", nullable = false, length = 32)
+    private VendorType vendorType = VendorType.HOUSEHOLD;
+
     @Column(nullable = false)
     private boolean active = true;
 
@@ -30,6 +35,8 @@ public class Vendor {
     public void setCode(String code) { this.code = code; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public VendorType getVendorType() { return vendorType; }
+    public void setVendorType(VendorType vendorType) { this.vendorType = vendorType; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getCreatedAt() { return createdAt; }

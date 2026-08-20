@@ -76,7 +76,7 @@ float HCSR04Sensor::readRawDistanceMm() {
         return -1;
     }
 
-    float distanceMm = (duration * getSpeedOfSound()) / 2.0f * 10.0f + _calibrationOffset;
+    float distanceMm = (duration * getSpeedOfSound()) / 2.0f * 10.0f;
 
     if (!validateDistance(distanceMm)) {
         _errorCount++;

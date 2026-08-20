@@ -1,6 +1,10 @@
 package com.flm.platform.domain;
 
+import com.flm.platform.common.CommType;
+import com.flm.platform.common.LifecycleState;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -26,6 +30,26 @@ public class Device {
     private String chipId;
     private String topicPrefix = "water";
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "model_id")
+    private DeviceModel model;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "site_id")
+    private Site site;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "comm_type", nullable = false, length = 16)
+    private CommType commType = CommType.wifi;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "lifecycle_state", nullable = false, length = 16)
+    private LifecycleState lifecycleState = LifecycleState.ACTIVE;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private String attributes;
+
     @Column(nullable = false)
     private boolean online;
 
@@ -48,6 +72,16 @@ public class Device {
     public void setChipId(String chipId) { this.chipId = chipId; }
     public String getTopicPrefix() { return topicPrefix; }
     public void setTopicPrefix(String topicPrefix) { this.topicPrefix = topicPrefix; }
+    public DeviceModel getModel() { return model; }
+    public void setModel(DeviceModel model) { this.model = model; }
+    public Site getSite() { return site; }
+    public void setSite(Site site) { this.site = site; }
+    public CommType getCommType() { return commType; }
+    public void setCommType(CommType commType) { this.commType = commType; }
+    public LifecycleState getLifecycleState() { return lifecycleState; }
+    public void setLifecycleState(LifecycleState lifecycleState) { this.lifecycleState = lifecycleState; }
+    public String getAttributes() { return attributes; }
+    public void setAttributes(String attributes) { this.attributes = attributes; }
     public boolean isOnline() { return online; }
     public void setOnline(boolean online) { this.online = online; }
     public Instant getLastSeenAt() { return lastSeenAt; }

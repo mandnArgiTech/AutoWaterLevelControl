@@ -289,7 +289,7 @@ FluidLevelFilter::FluidLevelFilter(uint8_t medianSize, uint8_t avgWindow,
     , _lastRaw(0)
     , _medianEnabled(true)
     , _movingAvgEnabled(true)
-    , _kalmanEnabled(true) {
+    , _kalmanEnabled(false) {
 }
 
 /**

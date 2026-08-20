@@ -37,20 +37,28 @@ public class VendorUserService {
 
     public List<VendorSummary> listVendors() {
         return vendorRepository.findAll().stream()
-            .map(v -> new VendorSummary(v.getId(), v.getCode(), v.getName(), v.isActive(), v.getCreatedAt()))
+            .map(v -> new VendorSummary(v.getId(), v.getCode(), v.getName(), v.getVendorType(), v.isActive(), v.getCreatedAt()))
             .toList();
     }
 
     @Transactional
     public VendorSummary createVendor(String code, String name) {
+        return createVendor(code, name, null);
+    }
+
+    @Transactional
+    public VendorSummary createVendor(String code, String name, String vendorType) {
         if (vendorRepository.existsByCode(code)) {
             throw new IllegalArgumentException("Vendor code exists");
         }
         Vendor v = new Vendor();
         v.setCode(code.toLowerCase());
         v.setName(name);
+        if (vendorType != null && !vendorType.isBlank()) {
+            v.setVendorType(com.flm.platform.common.VendorType.valueOf(vendorType.trim().toUpperCase()));
+        }
         v = vendorRepository.save(v);
-        return new VendorSummary(v.getId(), v.getCode(), v.getName(), v.isActive(), v.getCreatedAt());
+        return new VendorSummary(v.getId(), v.getCode(), v.getName(), v.getVendorType(), v.isActive(), v.getCreatedAt());
     }
 
     public List<UserSummary> listUsers(UUID vendorId) {

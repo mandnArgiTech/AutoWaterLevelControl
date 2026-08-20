@@ -1,5 +1,12 @@
 export type UserRole = 'SUPER_ADMIN' | 'VENDOR_ADMIN' | 'OPERATOR' | 'VIEWER';
 
+export type VendorType =
+  | 'HOUSEHOLD'
+  | 'APARTMENT'
+  | 'WATER_UTILITY'
+  | 'IRRIGATION'
+  | 'OTHER';
+
 export type PermissionKey =
   | 'PLATFORM_MQTT_READ'
   | 'PLATFORM_MQTT_WRITE'
@@ -23,6 +30,7 @@ export interface LoginResponse {
   vendorId?: string;
   vendorCode?: string;
   vendorName?: string;
+  vendorType?: VendorType | null;
   mustChangePassword: boolean;
   permissions?: PermissionKey[];
   mfaRequired?: boolean;
@@ -42,6 +50,16 @@ export interface DeviceSummary {
   /** Device system uptime, e.g. "2d 5h 30m 15s" */
   uptime?: string;
   uptimeMs?: number;
+  lifecycleState?: string;
+  modelKey?: string;
+  siteId?: string;
+  freeHeap?: number;
+  minFreeHeap?: number;
+  maxFreeBlock?: number;
+  rssi?: number;
+  ipAddress?: string;
+  firmware?: string;
+  healthReceivedAt?: string;
 }
 
 export interface ReadingPoint {
@@ -49,6 +67,72 @@ export interface ReadingPoint {
   percentFilled?: number;
   volumeLiters?: number;
   temperatureC?: number;
+}
+
+export interface SiteSummary {
+  id: string;
+  vendorId: string;
+  name: string;
+  kind: string;
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface DeviceModelSummary {
+  modelKey: string;
+  name: string;
+  role: string;
+  board?: string;
+  mcu?: string;
+  defaultComm: string;
+  capabilityProfile?: string;
+}
+
+export interface CapabilitySummary {
+  id: string;
+  key: string;
+  name: string;
+  category: string;
+  description?: string;
+  metrics: MetricSummary[];
+}
+
+export interface MetricSummary {
+  key: string;
+  name: string;
+  unit?: string;
+  dataType: string;
+  minValue?: number;
+  maxValue?: number;
+  displayHint?: string;
+}
+
+export interface AssetSummary {
+  id: string;
+  siteId: string;
+  name: string;
+  kind: string;
+  attributes?: string;
+}
+
+export interface FlowEdgeSummary {
+  id: string;
+  siteId: string;
+  fromAssetId: string;
+  toAssetId: string;
+  kind: string;
+}
+
+export interface BindingSummary {
+  id: string;
+  assetId: string;
+  nodeCapabilityId: string;
+  role: string;
+  validFrom: string;
+  validTo?: string;
 }
 
 export interface UserSummary {
@@ -64,6 +148,7 @@ export interface VendorSummary {
   id: string;
   code: string;
   name: string;
+  vendorType?: VendorType;
   active: boolean;
   createdAt: string;
 }

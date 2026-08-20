@@ -132,7 +132,7 @@ float TFLunaSensor::readRawDistanceMm() {
     }
     if (!readFrame()) return -1;
 
-    float distMm = _rawDistance * 10.0f + _calibrationOffset;
+    float distMm = _rawDistance * 10.0f;
 
     if (distMm < TFLUNA_MIN_DISTANCE_MM) {
         _lastError = ErrorCode::ERR_SENSOR_DISTANCE_MIN;

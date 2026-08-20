@@ -7,6 +7,7 @@ import ChangePasswordPage from './pages/ChangePasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import Layout from './components/Layout';
 
+const RegistrationWizardPage = lazy(() => import('./pages/RegistrationWizardPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const UsersPage = lazy(() => import('./pages/UsersPage'));
 const AdminVendorsPage = lazy(() => import('./pages/AdminVendorsPage'));
@@ -41,6 +42,7 @@ export default function App() {
               <Suspense fallback={<PageFallback />}>
                 <Routes>
                   <Route path="/" element={<DashboardPage />} />
+                  <Route path="/setup" element={<RegistrationWizardPage />} />
                   <Route path="/reports" element={<ReportsPage />} />
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/admin/vendors" element={

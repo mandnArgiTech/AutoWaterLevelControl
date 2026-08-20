@@ -21,7 +21,17 @@ public class LevelReadingDao {
         Long uptimeMs,
         Float percentFilled,
         Float volumeLiters,
-        Instant latestReadingAt
+        Instant latestReadingAt,
+        String lifecycleState,
+        String modelKey,
+        UUID siteId,
+        Integer freeHeap,
+        Integer minFreeHeap,
+        Integer maxFreeBlock,
+        Short rssi,
+        String ipAddress,
+        String firmware,
+        Instant healthReceivedAt
     ) {}
 
     public record ReadingRow(
@@ -30,6 +40,19 @@ public class LevelReadingDao {
         Float volumeLiters,
         Float temperatureC
     ) {}
+
+    private static final String DEVICE_SELECT = """
+        SELECT d.id, d.device_tag, d.display_name, d.online, d.last_seen_at, d.uptime_ms,
+               d.lifecycle_state, d.site_id,
+               m.model_key,
+               l.percent_filled, l.volume_liters, l.received_at AS latest_received_at,
+               h.free_heap, h.min_free_heap, h.max_free_block, h.rssi AS health_rssi,
+               h.ip_address, h.firmware, h.received_at AS health_received_at
+        FROM devices d
+        LEFT JOIN device_latest l ON l.device_id = d.id
+        LEFT JOIN device_model m ON m.id = d.model_id
+        LEFT JOIN device_health_latest h ON h.device_id = d.id
+        """;
 
     private static final RowMapper<DeviceWithLatest> DEVICE_MAPPER = (rs, i) -> new DeviceWithLatest(
         (UUID) rs.getObject("id"),
@@ -40,7 +63,17 @@ public class LevelReadingDao {
         rs.getObject("uptime_ms") != null ? rs.getLong("uptime_ms") : null,
         rs.getObject("percent_filled") != null ? rs.getFloat("percent_filled") : null,
         rs.getObject("volume_liters") != null ? rs.getFloat("volume_liters") : null,
-        toInstant(rs.getTimestamp("latest_received_at"))
+        toInstant(rs.getTimestamp("latest_received_at")),
+        rs.getString("lifecycle_state"),
+        rs.getString("model_key"),
+        (UUID) rs.getObject("site_id"),
+        rs.getObject("free_heap") != null ? rs.getInt("free_heap") : null,
+        rs.getObject("min_free_heap") != null ? rs.getInt("min_free_heap") : null,
+        rs.getObject("max_free_block") != null ? rs.getInt("max_free_block") : null,
+        rs.getObject("health_rssi") != null ? rs.getShort("health_rssi") : null,
+        rs.getString("ip_address"),
+        rs.getString("firmware"),
+        toInstant(rs.getTimestamp("health_received_at"))
     );
 
     private static final RowMapper<ReadingRow> READING_MAPPER = (rs, i) -> new ReadingRow(
@@ -58,32 +91,15 @@ public class LevelReadingDao {
 
     public List<DeviceWithLatest> listDevicesWithLatest(UUID vendorId) {
         if (vendorId == null) {
-            return jdbc.query("""
-                SELECT d.id, d.device_tag, d.display_name, d.online, d.last_seen_at, d.uptime_ms,
-                       l.percent_filled, l.volume_liters, l.received_at AS latest_received_at
-                FROM devices d
-                LEFT JOIN device_latest l ON l.device_id = d.id
-                ORDER BY d.display_name ASC
-                """, DEVICE_MAPPER);
+            return jdbc.query(DEVICE_SELECT + " ORDER BY d.display_name ASC", DEVICE_MAPPER);
         }
-        return jdbc.query("""
-            SELECT d.id, d.device_tag, d.display_name, d.online, d.last_seen_at, d.uptime_ms,
-                   l.percent_filled, l.volume_liters, l.received_at AS latest_received_at
-            FROM devices d
-            LEFT JOIN device_latest l ON l.device_id = d.id
-            WHERE d.vendor_id = ?
-            ORDER BY d.display_name ASC
-            """, DEVICE_MAPPER, vendorId);
+        return jdbc.query(DEVICE_SELECT + " WHERE d.vendor_id = ? ORDER BY d.display_name ASC",
+            DEVICE_MAPPER, vendorId);
     }
 
     public Optional<DeviceWithLatest> findDeviceWithLatest(UUID deviceId) {
-        List<DeviceWithLatest> rows = jdbc.query("""
-            SELECT d.id, d.device_tag, d.display_name, d.online, d.last_seen_at, d.uptime_ms,
-                   l.percent_filled, l.volume_liters, l.received_at AS latest_received_at
-            FROM devices d
-            LEFT JOIN device_latest l ON l.device_id = d.id
-            WHERE d.id = ?
-            """, DEVICE_MAPPER, deviceId);
+        List<DeviceWithLatest> rows = jdbc.query(
+            DEVICE_SELECT + " WHERE d.id = ?", DEVICE_MAPPER, deviceId);
         return rows.stream().findFirst();
     }
 

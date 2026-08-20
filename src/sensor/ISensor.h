@@ -177,6 +177,12 @@ public:
     virtual String getStatusJson() const = 0;
     
     /**
+     * @brief Raw hardware distance in mm — no filter, no calibration offset.
+     * @return Distance in mm, or -1 on error / unsupported
+     */
+    virtual float readRawDistanceMm() { return -1; }
+
+    /**
      * @brief Set calibration offset in mm
      * @param offsetMm Offset to add to readings
      */

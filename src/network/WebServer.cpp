@@ -36,6 +36,10 @@ void WebServerManager::setupRoutes() {
     _server.on("/api/sensor", HTTP_GET, std::bind(&WebServerManager::handleApiSensor, this));
     _server.on("/api/info", HTTP_GET, std::bind(&WebServerManager::handleApiInfo, this));
 
+    _server.on("/calibrate-distance", HTTP_GET, std::bind(&WebServerManager::handleDistanceCalibratePage, this));
+    _server.on("/api/calibrate/distance", HTTP_GET, std::bind(&WebServerManager::handleApiDistanceCalibrateGet, this));
+    _server.on("/api/calibrate/distance", HTTP_POST, std::bind(&WebServerManager::handleApiDistanceCalibratePost, this));
+
 #ifdef FLM_BATTERY_MONITOR
     _server.on("/calibrate-battery", HTTP_GET, std::bind(&WebServerManager::handleBatteryCalibratePage, this));
     _server.on("/api/battery/calibrate", HTTP_GET, std::bind(&WebServerManager::handleApiBatteryCalibrateGet, this));
@@ -63,6 +67,7 @@ void WebServerManager::setupRoutes() {
     _server.on("/api/wifi/scan", HTTP_GET, std::bind(&WebServerManager::handleApiWiFiScan, this));
 
     _server.on("/api/mqtt/status", HTTP_GET, std::bind(&WebServerManager::handleApiMQTTStatus, this));
+    _server.on("/api/mqtt/log", HTTP_GET, std::bind(&WebServerManager::handleApiMQTTLog, this));
     _server.on("/api/mqtt/ca", HTTP_POST, std::bind(&WebServerManager::handleApiMQTTCaPost, this));
     _server.on("/api/mqtt/ca", HTTP_DELETE, std::bind(&WebServerManager::handleApiMQTTCaDelete, this));
 

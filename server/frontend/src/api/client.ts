@@ -150,4 +150,52 @@ export const api = {
         body: JSON.stringify({ command }),
       },
     ),
+
+  sites: () => request<import('./types').SiteSummary[]>('/sites'),
+  createSite: (body: object) =>
+    request<import('./types').SiteSummary>('/sites', { method: 'POST', body: JSON.stringify(body) }),
+
+  deviceModels: () => request<import('./types').DeviceModelSummary[]>('/device-models'),
+  capabilities: () => request<import('./types').CapabilitySummary[]>('/capabilities'),
+  pendingDevices: () => request<Array<{
+    deviceTag: string;
+    chipId?: string;
+    modelKey?: string;
+    topicPrefix?: string;
+    sampleCount: number;
+    lastSeenAt: string;
+  }>>('/devices/pending'),
+
+  registerDevice: (body: object) =>
+    request<DeviceSummary>('/devices', { method: 'POST', body: JSON.stringify(body) }),
+
+  siteAssets: (siteId: string) =>
+    request<import('./types').AssetSummary[]>(`/sites/${siteId}/assets`),
+  createAsset: (siteId: string, body: object) =>
+    request<import('./types').AssetSummary>(`/sites/${siteId}/assets`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  siteFlows: (siteId: string) =>
+    request<import('./types').FlowEdgeSummary[]>(`/sites/${siteId}/flows`),
+  createFlow: (siteId: string, body: object) =>
+    request<import('./types').FlowEdgeSummary>(`/sites/${siteId}/flows`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  provisionSite: (siteId: string, body: object) =>
+    request<Record<string, unknown>>(`/sites/${siteId}/provision`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+
+  ensureChannel: (deviceId: string, body: object) =>
+    request<{ id: string; capabilityKey: string }>(`/devices/${deviceId}/channels`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+  deviceChannels: (deviceId: string) =>
+    request<Array<{ id: string; capabilityKey: string; chanIndex: number; name?: string }>>(
+      `/devices/${deviceId}/channels`,
+    ),
+  createBinding: (body: object) =>
+    request<import('./types').BindingSummary>('/bindings', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
 };

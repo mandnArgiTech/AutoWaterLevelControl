@@ -153,33 +153,29 @@ WaterLevel TankCalculator::calculateFromDistance(float distanceMm) {
     }
     
     TankConfig& tankConfig = ConfigManager::getInstance().getTankConfig();
-    SensorConfig& sensorConfig = ConfigManager::getInstance().getSensorConfig();
-    
-    float airGap = distanceMm - sensorConfig.offsetMm;
-    float waterHeight = tankConfig.height - airGap;
+
+    // Proven A02YYUW model (see tmp/a02yyuw_sensor):
+    //   distance already includes additive calibration trim (ISensor offset)
+    //   waterDepth = tankHeight - emptySpace
+    float waterHeight = tankConfig.height - distanceMm;
     level.waterHeightMm = waterHeight;
     level.waterHeightCm = waterHeight / 10.0f;
-    
-    if (waterHeight < 0) {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "%.1fmm", waterHeight);
-        level.error = ErrorCode::ERR_TANK_LEVEL_NEGATIVE;
-        ErrorHandler::getInstance().logError(level.error, msg);
-        level.waterHeightMm = 0;
-        level.waterHeightCm = 0;
-        level.percentFilled = 0;
-        level.percentRemaining = 100;
-        level.volumeLiters = 0;
+
+    if (waterHeight < 0.f) {
+        // Empty / sensor past tank floor — clamp, do not alarm every poll
+        level.waterHeightMm = 0.f;
+        level.waterHeightCm = 0.f;
+        level.percentFilled = 0.f;
+        level.percentRemaining = 100.f;
+        level.volumeLiters = 0.f;
         level.volumeRemaining = tankConfig.volumeLiters;
         level.valid = true;
+        level.error = ErrorCode::ERR_NONE;
         return level;
     }
-    
+
     if (waterHeight > tankConfig.height) {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "%.1fmm", waterHeight);
-        level.error = ErrorCode::ERR_TANK_LEVEL_OVERFLOW;
-        ErrorHandler::getInstance().logError(level.error, msg);
+        // Full / closer than rim — clamp
         level.waterHeightMm = tankConfig.height;
         level.waterHeightCm = tankConfig.height / 10.0f;
     }

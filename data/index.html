@@ -73,6 +73,14 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .toasts{position:fixed;bottom:16px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:99}
 .toast{padding:12px 16px;font-size:1rem;font-weight:600;border-radius:10px;background:#fff;border:2px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.1)}
 .toast.success{border-color:var(--ok)}.toast.error{border-color:var(--err)}
+.console{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:10px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  max-height:360px;overflow:auto;border:2px solid #1e293b}
+.console .line{padding:3px 0;border-bottom:1px solid #1e293b;word-break:break-all}
+.console .line:last-child{border-bottom:none}
+.console .tx{color:#7dd3fc}.console .rx{color:#86efac}
+.console .bad{color:#fca5a5}
+.console .meta{color:#94a3b8}
+.pill.ok{background:var(--ok)}.pill.warn{background:var(--warn);color:#000}.pill.err{background:var(--err)}
 code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
 @media(max-width:640px){
   .hero{grid-template-columns:1fr}
@@ -100,14 +108,15 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
       <div style="text-align:center"><span class="pill" id="tank-state">…</span></div>
     </div>
     <div class="grid">
-      <div class="stat"><div class="k">Water Height</div><div class="v" id="height">—<span class="u">cm</span></div></div>
+      <div class="stat"><div class="k">Water Height</div><div class="v" id="height">—<span class="u">mm</span></div></div>
       <div class="stat"><div class="k">Volume</div><div class="v" id="volume">—<span class="u">L</span></div></div>
       <div class="stat"><div class="k">Remaining</div><div class="v" id="vol-remaining">—<span class="u">L</span></div></div>
-      <div class="stat"><div class="k">Distance</div><div class="v" id="distance">—<span class="u">cm</span></div></div>
+      <div class="stat"><div class="k">Distance</div><div class="v" id="distance">—<span class="u">mm</span></div></div>
       <div class="stat"><div class="k">Temperature</div><div class="v" id="temperature">—<span class="u">&deg;C</span></div></div>
       <div class="stat"><div class="k">Battery</div><div class="v" id="battery">—<span class="u">V</span></div></div>
       <div class="stat"><div class="k">Uptime</div><div class="v" id="uptime">—</div></div>
       <div class="stat"><div class="k">Heap</div><div class="v" id="heap">—<span class="u">B</span></div></div>
+      <div class="stat"><div class="k">WiFi MAC</div><div class="v" id="wifi-mac" style="font-size:1.05rem;word-break:break-all">—</div></div>
     </div>
   </section>
 
@@ -115,6 +124,7 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
     <button class="tab active" data-panel="calibration">Calibration</button>
     <button class="tab" data-panel="wifi">WiFi</button>
     <button class="tab" data-panel="mqtt">MQTT</button>
+    <button class="tab" data-panel="console">Console</button>
     <button class="tab" data-panel="tank">Tank</button>
     <button class="tab" data-panel="sensor">Sensor</button>
     <button class="tab" data-panel="system">System</button>
@@ -122,26 +132,21 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
   </nav>
 
   <section class="card panel active" id="panel-calibration">
-    <div class="ptitle">Sensor Calibration <span class="tag" id="cal-poll-status">Live</span></div>
-    <div class="calbig">
+    <div class="ptitle">Sensor Calibration</div>
+    <p class="hint">Use the dedicated <b>raw distance</b> page (no filters). Measure with a tape, enter the value, and the device computes the offset.</p>
+    <div class="calbig" style="margin-top:14px">
       <div class="v" id="cal-distance">—</div>
-      <div class="u">cm — distance to water</div>
+      <div class="u">mm — live filtered distance (dashboard)</div>
       <div class="calrow">
-        <span>Height <b id="cal-height">—</b> cm</span>
+        <span>Water height <b id="cal-height">—</b> mm</span>
         <span>Level <b id="cal-percent">—</b>%</span>
         <span>Valid <b id="cal-valid">—</b></span>
       </div>
     </div>
-    <label>Calibration Offset (cm)</label>
-    <div class="slider">
-      <input type="range" id="offset-slider" min="-50" max="50" step="0.1" value="0">
-      <input type="number" id="offset-value" value="0" step="0.1">
-    </div>
-    <p class="hint">Match the distance to your tape measure, then Save.</p>
     <div class="btns">
-      <button class="btn" onclick="saveCalibration()">Save Calibration</button>
-      <button class="btn sec" onclick="resetCalibration()">Reset to Zero</button>
+      <a class="btn" href="/calibrate-distance" style="display:inline-block;text-decoration:none;text-align:center">Open distance calibration</a>
     </div>
+    <p class="hint">Calibration formula: <code>offset = tape − raw</code>, then <code>corrected = raw + offset</code>.</p>
   </section>
 
   <section class="card panel" id="panel-wifi">
@@ -150,6 +155,7 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
       <div><label>SSID</label><input type="text" id="wifi-ssid" placeholder="Network name"></div>
       <div><label>Password</label><input type="password" id="wifi-password" placeholder="Password"></div>
       <div><label>Hostname</label><input type="text" id="wifi-hostname" placeholder="FluidMonitor"></div>
+      <div><label>WiFi MAC</label><input type="text" id="wifi-mac-field" readonly value="—"></div>
     </div>
     <div id="wifi-networks" style="display:none;max-height:220px;overflow-y:auto;margin-top:12px;border:2px solid var(--line);border-radius:10px"></div>
     <div class="btns">
@@ -170,6 +176,15 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
       <div><label>Topic Prefix</label><input type="text" id="mqtt-topic" placeholder="water"></div>
       <div><label>Publish Interval (ms)</label><input type="number" id="mqtt-interval" value="60000"></div>
     </div>
+    <p class="hint">Device Name is the single identity for this unit (MQTT topics + status). Example topic: tank1_&lt;chipId&gt;/water/level</p>
+    <div class="row" style="margin-top:14px">
+      <div class="stat"><div class="k">Connection</div><div class="v" style="font-size:1.1rem"><span class="pill" id="mqtt-conn-pill">—</span></div></div>
+      <div class="stat"><div class="k">Published / errors</div><div class="v" style="font-size:1.1rem" id="mqtt-counts">—</div></div>
+    </div>
+    <div class="stat" style="margin-top:12px">
+      <div class="k">Last message sent</div>
+      <div id="mqtt-last-sent" style="font-weight:700;color:var(--accent);margin-top:6px;word-break:break-all">—</div>
+    </div>
     <div class="stat" style="margin-top:14px">
       <div class="k">Topic Preview</div>
       <div id="mqtt-topic-preview" style="font-weight:700;color:var(--accent);margin-top:4px">—</div>
@@ -177,12 +192,22 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
     <div class="btns"><button class="btn" onclick="saveConfig('mqtt')">Save MQTT</button></div>
   </section>
 
+  <section class="card panel" id="panel-console">
+    <div class="ptitle">MQTT console <span class="tag" id="console-count">0/24</span></div>
+    <p class="hint">Last 24 MQTT messages (TX = publish, RX = received). Newest at top. Payload previews are truncated on device.</p>
+    <div class="btns" style="margin-top:0;margin-bottom:10px">
+      <button class="btn sec" onclick="refreshMqttLog()">Refresh</button>
+      <button class="btn sec" id="console-auto-btn" onclick="toggleConsoleAuto()">Auto: ON</button>
+    </div>
+    <div class="console" id="mqtt-console"><div class="line meta">Waiting for messages…</div></div>
+  </section>
+
   <section class="card panel" id="panel-tank">
     <div class="ptitle">Tank</div>
     <div class="row">
       <div><label>Tank Type</label><select id="tank-type"><option value="circular">Circular</option><option value="rectangular">Rectangular</option></select></div>
-      <div><label>Diameter (cm)</label><input type="number" id="tank-diameter" value="143.4" step="0.1"></div>
-      <div><label>Height (cm)</label><input type="number" id="tank-height" value="150.3" step="0.1"></div>
+      <div><label>Diameter (mm)</label><input type="number" id="tank-diameter" value="1434" step="1" min="10" max="30000"></div>
+      <div><label>Height (mm)</label><input type="number" id="tank-height" value="1503" step="1" min="50" max="30000"></div>
       <div><label>Volume (L)</label><input type="number" id="tank-volume" readonly></div>
     </div>
     <div class="btns"><button class="btn" onclick="saveConfig('tank')">Save Tank</button></div>
@@ -191,10 +216,11 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
   <section class="card panel" id="panel-sensor">
     <div class="ptitle">Sensor</div>
     <div class="row">
-      <div><label>Sensor Offset (cm)</label><input type="number" id="sensor-offset" value="5" step="0.1"></div>
-      <div><label>Samples</label><input type="number" id="sensor-samples" value="5"></div>
-      <div><label>Read Interval (ms)</label><input type="number" id="sensor-interval" value="2000"></div>
+      <div><label>Sensor Offset (mm)</label><input type="number" id="sensor-offset" value="0" step="1"></div>
+      <div><label>Samples</label><input type="number" id="sensor-samples" value="5" min="1" max="32"></div>
+      <div><label>Read Interval (ms)</label><input type="number" id="sensor-interval" value="2000" min="200"></div>
     </div>
+    <p class="hint">Offset is set on the <a href="/calibrate-distance">Distance calibration</a> page (tape − raw). Prefer that over editing here.</p>
     <div class="btns"><button class="btn" onclick="saveConfig('sensor')">Save Sensor</button></div>
   </section>
 
@@ -211,10 +237,21 @@ code{background:#eef3f8;padding:2px 6px;border-radius:6px;font-size:.9rem}
   <section class="card panel" id="panel-system">
     <div class="ptitle">System</div>
     <div class="row">
-      <div><label>Device Name</label><input type="text" id="system-name" placeholder="Water Tank Monitor"></div>
-      <div><label>Timezone Offset (s)</label><input type="number" id="system-timezone" value="19800"></div>
-      <div><label class="check"><input type="checkbox" id="system-debug" checked> Debug Mode</label></div>
+      <div>
+        <label>Timezone</label>
+        <select id="system-timezone">
+          <option value="19800">India IST (UTC+5:30)</option>
+          <option value="0">UTC</option>
+          <option value="3600">UTC+1</option>
+          <option value="7200">UTC+2</option>
+          <option value="28800">UTC+8</option>
+          <option value="-18000">UTC−5</option>
+          <option value="-28800">UTC−8</option>
+        </select>
+      </div>
+      <div><label class="check"><input type="checkbox" id="system-debug"> Debug Mode</label></div>
     </div>
+    <p class="hint">Timezone sets local clock for logs (NTP). 19800 seconds = India UTC+5:30. Device Name is under MQTT.</p>
     <div class="btns">
       <button class="btn" onclick="saveConfig('system')">Save</button>
       <button class="btn sec" onclick="restartDevice()">Restart</button>
@@ -230,8 +267,14 @@ const API='/api';
 const $=id=>document.getElementById(id);
 const n=(v,d=1)=>Number.isFinite(+v)?(+v).toFixed(d):'—';
 const setV=(id,val,unit)=>{const el=$(id);if(el)el.innerHTML=val+'<span class="u">'+unit+'</span>';};
+const mmOf=(L,mmKey,cmKey)=>{
+  if(L[mmKey]!=null&&Number.isFinite(+L[mmKey])) return +L[mmKey];
+  if(L[cmKey]!=null&&Number.isFinite(+L[cmKey])) return +L[cmKey]*10;
+  return null;
+};
 
 let busy=false, lastOk=0, activePanel='calibration', cfgLoaded={};
+let consoleAuto=true, consoleBusy=false;
 
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
@@ -239,43 +282,115 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   t.classList.add('active');
   activePanel=t.dataset.panel;
   $('panel-'+activePanel).classList.add('active');
-  if(activePanel==='calibration') loadCalibrationOffset();
-  else loadSectionData(activePanel);
+  if(activePanel==='console') refreshMqttLog();
+  else if(activePanel!=='calibration') loadSectionData(activePanel);
 }));
 
-$('offset-slider').addEventListener('input',e=>$('offset-value').value=e.target.value);
-$('offset-value').addEventListener('change',e=>$('offset-slider').value=e.target.value);
+function fmtAge(ms){
+  if(ms==null||ms<0) return 'never';
+  if(ms<1000) return ms+' ms ago';
+  if(ms<60000) return Math.round(ms/1000)+' s ago';
+  return Math.round(ms/60000)+' min ago';
+}
+
+function applyMqttStatus(m){
+  if(!m) return;
+  const pill=$('mqtt-conn-pill');
+  if(pill){
+    const st=m.state||(m.connected?'connected':'disconnected');
+    pill.textContent=st;
+    pill.className='pill '+(m.connected?'ok':(st==='disabled'?'warn':'err'));
+  }
+  const counts=$('mqtt-counts');
+  if(counts) counts.textContent=(m.publishCount!=null?m.publishCount:0)+' / '+(m.publishErrors!=null?m.publishErrors:0);
+  const last=m.lastPublish||{};
+  const el=$('mqtt-last-sent');
+  if(el){
+    if(!last.topic&&last.ageMs===-1){ el.textContent='—'; }
+    else {
+      const ok=last.ok?'OK':'FAIL';
+      el.innerHTML='<span class="pill '+(last.ok?'ok':'err')+'">'+ok+'</span> '+
+        fmtAge(last.ageMs)+'<br><span style="font-size:.9rem;font-weight:600;color:var(--muted)">'+
+        (last.topic||'')+'</span><br><code style="font-size:.85rem">'+(last.payload||'')+'</code>';
+    }
+  }
+  const cc=$('console-count');
+  if(cc&&m.logCount!=null) cc.textContent=m.logCount+'/'+(m.logCapacity||24);
+}
 
 function applyLive(d){
   const L=d.level||{};
+  const dist=mmOf(L,'distanceMm','distanceCm');
+  const height=mmOf(L,'waterHeightMm','waterHeightCm');
   const ok=!!(L.sensorOk&&L.valid);
   const pct=ok?+L.percentFilled:0;
+
   $('water-level').style.height=Math.max(0,Math.min(100,pct))+'%';
   $('percentage').textContent=ok?n(pct,1)+'%':'—';
   $('remaining').textContent=ok?n(L.percentRemaining,1):'—';
-  setV('height',ok?n(L.waterHeightCm,1):'—','cm');
+  setV('height',ok&&height!=null?n(height,0):'—','mm');
   setV('volume',ok?n(L.volumeLiters,1):'—','L');
   setV('vol-remaining',ok?n(L.volumeRemaining,1):'—','L');
-  setV('distance',(L.distanceCm!=null)?n(L.distanceCm,1):'—','cm');
+  setV('distance',dist!=null?n(dist,0):'—','mm');
+  $('cal-distance').textContent=dist!=null?n(dist,0):'—';
+  $('cal-height').textContent=ok&&height!=null?n(height,0):'—';
+  $('cal-percent').textContent=ok?n(pct,1):'—';
+  $('cal-valid').textContent=ok?'Yes':'No';
+
   if(L.temperatureC!=null) setV('temperature',n(L.temperatureC,1),'°C');
   const st=$('tank-state');
   st.textContent=L.state||(ok?'ok':'error');
   st.className='pill '+(L.state||'sensor_error');
 
-  $('cal-distance').textContent=(L.distanceCm!=null)?n(L.distanceCm,1):'—';
-  $('cal-height').textContent=ok?n(L.waterHeightCm,1):'—';
-  $('cal-percent').textContent=ok?n(L.percentFilled,1):'—';
-  $('cal-valid').textContent=ok?'Yes':'No';
-
   $('wifi-status').className='dot'+(d.connection&&d.connection.wifi?' on':'');
   $('mqtt-status').className='dot'+(d.connection&&d.connection.mqtt?' on':'');
+  if(d.mqtt){
+    const label=d.mqtt.state||(d.mqtt.connected?'connected':'off');
+    $('mqtt-status').textContent='MQTT '+label;
+    applyMqttStatus(d.mqtt);
+  }
   if(d.battery&&d.battery.voltage!=null){
     setV('battery',n(d.battery.voltage,2)+(d.battery.percent!=null?' · '+d.battery.percent+'%':''),'V');
   }
   $('uptime').textContent=d.uptime||'—';
   if(d.freeHeap!=null) setV('heap',String(d.freeHeap),'B');
-  const tag=$('cal-poll-status');
-  tag.textContent='Live';tag.className='tag';
+  const mac=d.mac||(d.connection&&d.connection.mac)||'';
+  if(mac){
+    $('wifi-mac').textContent=mac;
+    const wf=$('wifi-mac-field'); if(wf) wf.value=mac;
+  }
+}
+
+function renderMqttLog(d){
+  const box=$('mqtt-console');
+  const msgs=d.messages||[];
+  $('console-count').textContent=(d.count!=null?d.count:msgs.length)+'/'+(d.capacity||24);
+  if(!msgs.length){ box.innerHTML='<div class="line meta">No MQTT messages yet</div>'; return; }
+  const now=Date.now();
+  box.innerHTML=msgs.map(m=>{
+    const dir=(m.dir==='R')?'RX':'TX';
+    const cls=(m.dir==='R'?'rx':'tx')+(m.ok?'':' bad');
+    const age=m.ms!=null?fmtAge(Math.max(0,(now%0x100000000)-m.ms)):''; // best-effort vs millis
+    return '<div class="line '+cls+'"><span class="meta">['+dir+(m.ok?'':' FAIL')+']</span> '+
+      (m.topic||'')+' <span class="meta">'+ (m.payload||'') +'</span></div>';
+  }).join('');
+}
+
+async function refreshMqttLog(){
+  if(consoleBusy) return;
+  consoleBusy=true;
+  try{
+    const r=await fetch(API+'/mqtt/log?limit=24',{cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    renderMqttLog(await r.json());
+  }catch(e){
+    $('mqtt-console').innerHTML='<div class="line bad">Failed to load log</div>';
+  }finally{consoleBusy=false;}
+}
+
+function toggleConsoleAuto(){
+  consoleAuto=!consoleAuto;
+  $('console-auto-btn').textContent='Auto: '+(consoleAuto?'ON':'OFF');
 }
 
 async function tick(){
@@ -294,31 +409,8 @@ async function tick(){
   }catch(e){
     const age=lastOk?Math.round((Date.now()-lastOk)/1000)+'s ago':'offline';
     $('poll-age').textContent=age;
-    const tag=$('cal-poll-status');
-    tag.textContent='Retry';tag.className='tag off';
   }finally{busy=false;}
 }
-
-async function loadCalibrationOffset(){
-  if(cfgLoaded.sensor) return;
-  try{
-    const d=await(await fetch(API+'/config/sensor',{cache:'no-store'})).json();
-    const o=(d.offsetMm!=null)?d.offsetMm/10:0;
-    $('offset-slider').value=o;$('offset-value').value=o;
-    cfgLoaded.sensor=true;
-  }catch(e){}
-}
-
-async function saveCalibration(){
-  const o=parseFloat($('offset-value').value)||0;
-  try{
-    const r=await fetch(API+'/config/sensor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({offsetMm:o*10})});
-    const d=await r.json().catch(()=>({}));
-    toast(r.ok&&d.success!==false?'Calibration saved':(d.message||'Save failed'),r.ok?'success':'error');
-    cfgLoaded.sensor=false;
-  }catch(e){toast('Save failed','error');}
-}
-function resetCalibration(){$('offset-slider').value=0;$('offset-value').value=0;}
 
 async function loadSectionData(section){
   if(section==='firmware'){
@@ -331,9 +423,15 @@ async function loadSectionData(section){
     const d=await(await fetch(API+'/config/'+section,{cache:'no-store'})).json();
     if(section==='wifi'){$('wifi-ssid').value=d.ssid||'';$('wifi-password').value=d.password||'';$('wifi-hostname').value=d.hostname||'';}
     else if(section==='mqtt'){$('mqtt-enabled').checked=!!d.enabled;$('mqtt-server').value=d.server||'';$('mqtt-port').value=d.port||1883;$('mqtt-username').value=d.username||'';$('mqtt-password').value=d.password||'';$('mqtt-device-name').value=d.deviceName||'';$('mqtt-topic').value=d.topicPrefix||'';$('mqtt-interval').value=d.publishInterval||60000;updateTopicPreview();}
-    else if(section==='tank'){$('tank-type').value=d.type||'circular';$('tank-diameter').value=(d.diameter||1434)/10;$('tank-height').value=(d.height||1503)/10;$('tank-volume').value=(d.volumeLiters||0).toFixed(1);}
-    else if(section==='sensor'){$('sensor-offset').value=(d.offsetMm||50)/10;$('sensor-samples').value=d.samples||5;$('sensor-interval').value=d.readInterval||2000;}
-    else if(section==='system'){$('system-name').value=d.deviceName||'';$('system-timezone').value=d.timezoneOffset||19800;$('system-debug').checked=!!d.debugEnabled;}
+    else if(section==='tank'){$('tank-type').value=d.type||'circular';$('tank-diameter').value=d.diameter||1434;$('tank-height').value=d.height||1503;$('tank-volume').value=(d.volumeLiters||0).toFixed(1);}
+    else if(section==='sensor'){$('sensor-offset').value=d.offsetMm!=null?d.offsetMm:0;$('sensor-samples').value=d.samples||5;$('sensor-interval').value=d.readInterval||2000;}
+    else if(section==='system'){
+      const tz=String(d.timezoneOffset!=null?d.timezoneOffset:19800);
+      const sel=$('system-timezone');
+      if([...sel.options].some(o=>o.value===tz)) sel.value=tz;
+      else {const opt=document.createElement('option');opt.value=tz;opt.textContent='Custom ('+tz+' s)';sel.appendChild(opt);sel.value=tz;}
+      $('system-debug').checked=!!d.debugEnabled;
+    }
     cfgLoaded[section]=true;
   }catch(e){}
 }
@@ -342,9 +440,9 @@ async function saveConfig(section){
   let data={};
   if(section==='wifi')data={ssid:$('wifi-ssid').value,password:$('wifi-password').value,hostname:$('wifi-hostname').value};
   else if(section==='mqtt')data={enabled:$('mqtt-enabled').checked,server:$('mqtt-server').value,port:+$('mqtt-port').value,username:$('mqtt-username').value,password:$('mqtt-password').value,deviceName:$('mqtt-device-name').value,topicPrefix:$('mqtt-topic').value,publishInterval:+$('mqtt-interval').value};
-  else if(section==='tank')data={type:$('tank-type').value,diameter:+$('tank-diameter').value*10,height:+$('tank-height').value*10};
-  else if(section==='sensor')data={offsetMm:+$('sensor-offset').value*10,samples:+$('sensor-samples').value,readInterval:+$('sensor-interval').value};
-  else if(section==='system')data={deviceName:$('system-name').value,timezoneOffset:+$('system-timezone').value,debugEnabled:$('system-debug').checked};
+  else if(section==='tank')data={type:$('tank-type').value,diameter:+$('tank-diameter').value,height:+$('tank-height').value};
+  else if(section==='sensor')data={offsetMm:+$('sensor-offset').value,samples:+$('sensor-samples').value,readInterval:+$('sensor-interval').value};
+  else if(section==='system')data={timezoneOffset:+$('system-timezone').value,debugEnabled:$('system-debug').checked};
   try{
     const r=await fetch(API+'/config/'+section,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     const res=await r.json();
@@ -382,9 +480,9 @@ function updateTopicPreview(){const p=$('mqtt-topic').value||'water',n=$('mqtt-d
 ['mqtt-topic','mqtt-device-name'].forEach(id=>$(id).addEventListener('input',updateTopicPreview));
 
 document.addEventListener('DOMContentLoaded',()=>{
-  loadCalibrationOffset();
   tick();
-  setInterval(tick,2000);
+  setInterval(tick,1500);
+  setInterval(()=>{ if(consoleAuto&&activePanel==='console') refreshMqttLog(); },2500);
 });
 </script>
 </body>

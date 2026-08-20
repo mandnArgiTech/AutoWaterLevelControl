@@ -237,6 +237,7 @@ public class AuthService {
             user.getVendor() != null ? user.getVendor().getId() : null,
             user.getVendor() != null ? user.getVendor().getCode() : null,
             user.getVendor() != null ? user.getVendor().getName() : null,
+            user.getVendor() != null ? user.getVendor().getVendorType() : null,
             user.isMustChangePassword(),
             permissions,
             mfaRequired,

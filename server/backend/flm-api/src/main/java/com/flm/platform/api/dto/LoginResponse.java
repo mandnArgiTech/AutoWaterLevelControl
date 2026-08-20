@@ -1,6 +1,7 @@
 package com.flm.platform.api.dto;
 
 import com.flm.platform.common.UserRole;
+import com.flm.platform.common.VendorType;
 import java.util.List;
 import java.util.UUID;
 
@@ -13,6 +14,7 @@ public record LoginResponse(
     UUID vendorId,
     String vendorCode,
     String vendorName,
+    VendorType vendorType,
     boolean mustChangePassword,
     List<String> permissions,
     boolean mfaRequired,
@@ -30,7 +32,7 @@ public record LoginResponse(
         String vendorName,
         boolean mustChangePassword
     ) {
-        this(token, userId, email, displayName, role, vendorId, vendorCode, vendorName,
+        this(token, userId, email, displayName, role, vendorId, vendorCode, vendorName, null,
             mustChangePassword, List.of(), false, false, null);
     }
 }

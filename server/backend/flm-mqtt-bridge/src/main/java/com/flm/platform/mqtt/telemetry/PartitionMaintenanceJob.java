@@ -53,6 +53,12 @@ public class PartitionMaintenanceJob {
                 (rs, rowNum) -> null,
                 year, month
             );
+            try {
+                jdbc.query("SELECT create_telemetry_env_partition(?, ?)", (rs, rowNum) -> null, year, month);
+                jdbc.query("SELECT create_telemetry_soil_partition(?, ?)", (rs, rowNum) -> null, year, month);
+            } catch (Exception ignored) {
+                // functions may not exist on older DBs
+            }
             log.debug("Ensured partition {}-{}", year, month);
         } catch (Exception e) {
             log.warn("Could not create partition {}-{}: {}", year, month, e.getMessage());

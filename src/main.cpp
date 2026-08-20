@@ -17,6 +17,7 @@
 #include "network/WebServer.h"
 #include "utils/Log.h"
 #include "utils/FlmTime.h"
+#include "utils/HeapMonitor.h"
 #include "utils/BatteryMonitor.h"
 #ifdef FLM_BATTERY_MONITOR
 #include "utils/adc_scaling.h"
@@ -120,14 +121,17 @@ void initializeSystem() {
         Serial.printf("[Main] Active: %s\n", activeSensor->getSensorTypeName().c_str());
     }
 
+    // Additive calibration trim (same model as tmp/a02yyuw_sensor).
+    // Tank math is: waterHeight = tankHeight - distance (distance already includes trim).
     activeSensor->setCalibrationOffset(sensorCfg.offsetMm);
-    Serial.printf("[Main] Calibration offset: %.1f cm\n", sensorCfg.offsetMm / 10.0f);
+    Serial.printf("[Main] Calibration offset: %.1f mm\n", sensorCfg.offsetMm);
 
+    // Filters disabled: dashboard uses raw + calibration offset only.
     activeSensor->configureFilter(
-        sensorCfg.filterEnabled,
+        false,
         sensorCfg.medianFilterSize,
         sensorCfg.movingAvgWindow,
-        sensorCfg.kalmanEnabled,
+        false,
         sensorCfg.kalmanProcessNoise,
         sensorCfg.kalmanMeasureNoise);
 
@@ -236,6 +240,8 @@ void loop() {
 }
 
 void processLoop() {
+    HeapMonitor::sample();
+
     // Service HTTP first — ESP8266WebServer is single-client; delays here stall the UI.
     if (webServer) webServer->loop();
 
@@ -271,7 +277,18 @@ void processLoop() {
     MQTTConfig& mqttCfg = ConfigManager::getInstance().getMQTTConfig();
     if (mqttCfg.enabled && MQTTManager::getInstance().isConnected()) {
         if (flmElapsedMs(lastMQTTPublish, mqttCfg.publishInterval)) {
-            publishMQTT();
+            // Shed MQTT publish when heap is critically low (avoids OOM reboot spiral).
+            if (HeapMonitor::belowFloor()) {
+                static unsigned long lastHeapWarn = 0;
+                if (millis() - lastHeapWarn >= 10000UL) {
+                    lastHeapWarn = millis();
+                    FLM_LOG_WARN("Main", "heap %u < floor %u — skip MQTT publish",
+                                 (unsigned)HeapMonitor::freeHeap(),
+                                 (unsigned)FLM_HEAP_FLOOR_BYTES);
+                }
+            } else {
+                publishMQTT();
+            }
             if (webServer) webServer->loop();
         }
     }
@@ -313,8 +330,8 @@ void readSensor() {
     if (!level.sensorOk) {
         if (millis() - lastSensorMsg >= 5000) {
             lastSensorMsg = millis();
-            Serial.printf("[Main] Sensor FAIL err=%d dist=%.1fcm — check wiring/type/blind-zone\n",
-                          (int)level.error, level.distanceCm);
+            Serial.printf("[Main] Sensor FAIL err=%d — A02YYUW frames OK but distance rejected (often below 30mm blind zone)\n",
+                          (int)level.error);
             if (activeSensor) {
                 Serial.println(activeSensor->getStatusJson());
             }

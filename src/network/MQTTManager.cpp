@@ -8,6 +8,7 @@
 
 #include "MQTTManager.h"
 #include "../version.h"
+#include "../utils/HeapMonitor.h"
 #include "../utils/Log.h"
 #include "../utils/TimeManager.h"
 #include <LittleFS.h>
@@ -41,8 +42,14 @@ MQTTManager::MQTTManager()
     , _lastConnectAttempt(0)
     , _reconnectDelayMs(MQTT_RECONNECT_INTERVAL)
     , _publishCount(0)
-    , _publishErrors(0) {
+    , _publishErrors(0)
+    , _lastPublishOk(false)
+    , _lastPublishMs(0)
+    , _logHead(0)
+    , _logCount(0) {
 
+    _lastPublishTopic[0] = '\0';
+    _lastPublishPayload[0] = '\0';
     _instance = this;
 }
 
@@ -314,6 +321,7 @@ ErrorCode MQTTManager::connect() {
         FLM_LOG_INFO("MQTT", "connected%s",
                      (config.tls && _secureClient && _secureClient->getMFLNStatus())
                          ? " (MFLN ok)" : "");
+        publishAnnounce();
         publishStatus();
         subscribe("command");
 #if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
@@ -421,16 +429,27 @@ bool MQTTManager::publishWaterLevel(const String& json) {
 }
 
 bool MQTTManager::publish(const String& subtopic, const String& payload, bool retained) {
+    String fullTopic = getTopic(subtopic);
+
     if (_state != MQTTState::CONNECTED) {
         _publishErrors++;
+        _lastPublishOk = false;
+        _lastPublishMs = millis();
+        copyTrunc(_lastPublishTopic, sizeof(_lastPublishTopic), fullTopic);
+        copyTrunc(_lastPublishPayload, sizeof(_lastPublishPayload), payload);
+        appendLog('T', false, fullTopic, String(F("(not connected) ") ) + payload);
         return false;
     }
 
-    String fullTopic = getTopic(subtopic);
     // PubSubClient needs topic + payload + MQTT header inside MQTT_BUFFER_SIZE.
     const size_t need = fullTopic.length() + payload.length() + 8;
     if (need > MQTT_BUFFER_SIZE) {
         _publishErrors++;
+        _lastPublishOk = false;
+        _lastPublishMs = millis();
+        copyTrunc(_lastPublishTopic, sizeof(_lastPublishTopic), fullTopic);
+        copyTrunc(_lastPublishPayload, sizeof(_lastPublishPayload), payload);
+        appendLog('T', false, fullTopic, String(F("(too large) ")) + payload);
         FLM_LOG_WARN("MQTT", "payload too large topic=%u payload=%u need=%u buf=%u",
                      (unsigned)fullTopic.length(), (unsigned)payload.length(),
                      (unsigned)need, (unsigned)MQTT_BUFFER_SIZE);
@@ -439,6 +458,12 @@ bool MQTTManager::publish(const String& subtopic, const String& payload, bool re
     }
 
     bool success = _mqttClient.publish(fullTopic.c_str(), payload.c_str(), retained);
+
+    _lastPublishOk = success;
+    _lastPublishMs = millis();
+    copyTrunc(_lastPublishTopic, sizeof(_lastPublishTopic), fullTopic);
+    copyTrunc(_lastPublishPayload, sizeof(_lastPublishPayload), payload);
+    appendLog('T', success, fullTopic, payload);
 
     if (success) {
         _publishCount++;
@@ -455,6 +480,7 @@ bool MQTTManager::publish(const String& subtopic, const String& payload, bool re
 
 bool MQTTManager::publishStatus() {
     JsonDocument doc;
+    HeapMonitor::sample();
 
     doc["online"] = true;
     doc["firmware"] = Version::getFirmware();
@@ -464,12 +490,54 @@ bool MQTTManager::publishStatus() {
     doc["ip"] = WiFi.localIP().toString();
     doc["rssi"] = WiFi.RSSI();
     doc["uptime"] = millis();
-    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["uptimeMs"] = millis();
+    doc["freeHeap"] = HeapMonitor::freeHeap();
+    doc["minFreeHeap"] = HeapMonitor::minFreeHeap();
+    doc["maxFreeBlock"] = HeapMonitor::maxFreeBlock();
 
     String payload;
     serializeJson(doc, payload);
 
     return publish("status", payload, true);
+}
+
+bool MQTTManager::publishAnnounce() {
+    JsonDocument doc;
+    doc["model_key"] =
+#if defined(FLM_ROLE_MOTOR_RELAY)
+        "motor_relay";
+#elif defined(FLM_ROLE_MOTOR_SMS)
+        "motor_sms";
+#else
+        "sensor";
+#endif
+    doc["chip_id"] = String(ESP.getChipId(), HEX);
+    doc["firmware"] = Version::getFirmware();
+    doc["comm"] = "wifi";
+    JsonArray caps = doc["capabilities"].to<JsonArray>();
+#if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)
+    caps.add("control.motor");
+#else
+    caps.add("measure.water_level");
+    caps.add("measure.env");
+#endif
+    caps.add("system.health");
+
+    String payload;
+    serializeJson(doc, payload);
+
+    // Birth topic is outside the water prefix: {tag}/system/announce
+    String topic = _deviceTag + "/system/announce";
+    if (_state != MQTTState::CONNECTED) return false;
+    bool ok = _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+    appendLog('T', ok, topic, payload);
+    if (ok) {
+        _publishCount++;
+        FLM_LOG_INFO("MQTT", "announce published");
+    } else {
+        _publishErrors++;
+    }
+    return ok;
 }
 
 // =============================================================================
@@ -506,6 +574,7 @@ void MQTTManager::mqttCallback(char* topic, byte* payload, unsigned int length) 
 
 void MQTTManager::handleMessage(const String& topic, const String& payload) {
     FLM_LOG_DEBUG("MQTT", "msg %s = %s", topic.c_str(), payload.c_str());
+    appendLog('R', true, topic, payload);
     if (_messageCallback) {
         _messageCallback(topic, payload);
     }
@@ -547,6 +616,13 @@ String MQTTManager::getTopic(const String& subtopic) const {
 
 String MQTTManager::getStatusJson() {
     JsonDocument doc;
+    fillStatus(doc.to<JsonObject>());
+    String output;
+    serializeJson(doc, output);
+    return output;
+}
+
+void MQTTManager::fillStatus(JsonObject doc) {
     MQTTConfig& config = ConfigManager::getInstance().getMQTTConfig();
 
     doc["enabled"] = config.enabled;
@@ -565,10 +641,90 @@ String MQTTManager::getStatusJson() {
     doc["publishInterval"] = config.publishInterval;
     doc["publishCount"] = _publishCount;
     doc["publishErrors"] = _publishErrors;
+    doc["logCount"] = _logCount;
+    doc["logCapacity"] = MQTT_LOG_CAPACITY;
 
-    String output;
-    serializeJson(doc, output);
-    return output;
+    JsonObject last = doc["lastPublish"].to<JsonObject>();
+    last["ok"] = _lastPublishOk;
+    last["ageMs"] = (_lastPublishMs > 0) ? (int32_t)(millis() - _lastPublishMs) : (int32_t)-1;
+    last["topic"] = _lastPublishTopic;
+    last["payload"] = _lastPublishPayload;
+}
+
+void MQTTManager::copyTrunc(char* dst, size_t dstLen, const String& src) {
+    if (!dst || dstLen == 0) return;
+    size_t n = src.length();
+    if (n >= dstLen) n = dstLen - 1;
+    memcpy(dst, src.c_str(), n);
+    dst[n] = '\0';
+}
+
+void MQTTManager::appendLog(char dir, bool ok, const String& topic, const String& payload) {
+    MqttLogEntry& e = _log[_logHead];
+    e.ms = millis();
+    e.dir = dir;
+    e.ok = ok;
+    copyTrunc(e.topic, sizeof(e.topic), topic);
+    copyTrunc(e.payload, sizeof(e.payload), payload);
+    _logHead = (_logHead + 1) % MQTT_LOG_CAPACITY;
+    if (_logCount < MQTT_LOG_CAPACITY) {
+        _logCount++;
+    }
+}
+
+static void mqttJsonEscapeAppend(String& out, const char* s) {
+    if (!s) return;
+    for (const char* p = s; *p; ++p) {
+        char c = *p;
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (c == '\n') {
+            out += F("\\n");
+        } else if (c == '\r') {
+            out += F("\\r");
+        } else if ((uint8_t)c < 0x20) {
+            // skip other control chars
+        } else {
+            out += c;
+        }
+    }
+}
+
+String MQTTManager::getLogJson(uint16_t limit) const {
+    if (limit == 0 || limit > MQTT_LOG_CAPACITY) {
+        limit = MQTT_LOG_CAPACITY;
+    }
+    uint16_t n = _logCount;
+    if (n > limit) n = limit;
+
+    String out;
+    out.reserve((size_t)n * 110u + 48u);
+    out += F("{\"count\":");
+    out += String(_logCount);
+    out += F(",\"capacity\":");
+    out += String(MQTT_LOG_CAPACITY);
+    out += F(",\"messages\":[");
+
+    for (uint16_t i = 0; i < n; i++) {
+        // Newest first
+        uint16_t idx = (_logHead + MQTT_LOG_CAPACITY - 1 - i) % MQTT_LOG_CAPACITY;
+        const MqttLogEntry& e = _log[idx];
+        if (i) out += ',';
+        out += F("{\"ms\":");
+        out += String(e.ms);
+        out += F(",\"dir\":\"");
+        out += e.dir;
+        out += F("\",\"ok\":");
+        out += e.ok ? F("true") : F("false");
+        out += F(",\"topic\":\"");
+        mqttJsonEscapeAppend(out, e.topic);
+        out += F("\",\"payload\":\"");
+        mqttJsonEscapeAppend(out, e.payload);
+        out += F("\"}");
+    }
+    out += F("]}");
+    return out;
 }
 
 String MQTTManager::stateToString(MQTTState state) {

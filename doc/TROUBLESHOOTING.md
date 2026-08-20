@@ -9,6 +9,8 @@
 6. [Calibration Issues](#calibration-issues)
 7. [Performance Issues](#performance-issues)
 8. [Error Codes](#error-codes)
+9. [OOM reboot loop after OTA](#oom-reboot-loop-after-ota)
+10. [OTA "No response from device"](#ota-no-response-from-device)
 
 ---
 
@@ -513,6 +515,56 @@ If REST config returns **503** / `CONFIG_LOCKED`, another client is saving confi
 | 401 | ERR_CONFIG_SAVE | Save failed | Check free space |
 | 402 | ERR_CONFIG_PARSE | JSON parse error | Validate JSON |
 | 403 | ERR_CONFIG_VALIDATE | Validation failed | Check values |
+
+---
+
+## OOM reboot loop after OTA
+
+**Symptom:** After a firmware OTA, the device pings and sometimes answers `/api/info`, but the web UI stalls, `/api/status` times out, and uptime resets every few seconds (reboot loop). Heap in status (when it answers) is ~3–4 KB.
+
+**Cause (2026-07-17):** Build ~165 shipped an MQTT console ring buffer of **200 entries** (~16–19 KB static RAM). Free heap collapsed; serving `index.html.gz` and building status JSON triggered OOM / watchdog resets.
+
+**Fix / prevention:**
+
+1. Keep `MQTT_LOG_CAPACITY` small (currently **24**). A compile-time `static_assert` in `MQTTManager.h` fails the build if the ring exceeds 4 KB.
+2. Heap floor guard: if free heap &lt; `FLM_HEAP_FLOOR_BYTES` (default 8192), the main loop **skips MQTT publish** and logs a throttled warning instead of allocating more.
+3. Check `/api/status` fields:
+   - `freeHeap` — current free
+   - `minFreeHeap` — low-water mark since boot
+   - `maxFreeBlock` — largest contiguous free block (fragmentation)
+
+**Recovery:** Flash a build with the smaller buffer (USB if OTA cannot complete while reboot-looping). Use `scripts/ota_preflight.sh` once the device is stable.
+
+---
+
+## OTA "No response from device"
+
+**Symptom:** `pio run -e sensor_only_d1mini_ota -t upload --upload-port <ip>` reaches “Waiting for device…” then `No response from device`, even though the device pings and HTTP works.
+
+**Cause:** ArduinoOTA handshake is:
+
+1. PC sends UDP invitation to device:8266
+2. Device replies `OK` (UDP)
+3. Device opens a **TCP connection back to the PC** to pull the image
+
+Step 3 fails when the PC firewall (often **UFW**) blocks inbound TCP from the ESP. espota then reports “No response from device” (TCP accept timeout), which looks like the device is offline.
+
+**Fix:**
+
+```bash
+sudo ufw allow from 192.168.x.0/24 comment 'FLM ArduinoOTA'
+sudo ufw reload
+```
+
+Also set your PC’s LAN IP in `platformio.ini` (`upload_flags = --host_ip=…`) so the invitation is not advertised as `0.0.0.0`.
+
+**Pre-flight:**
+
+```bash
+scripts/ota_preflight.sh <device-ip>           # checks only
+scripts/ota_preflight.sh <device-ip> upload    # firmware
+scripts/ota_preflight.sh <device-ip> uploadfs  # LittleFS
+```
 
 ---
 

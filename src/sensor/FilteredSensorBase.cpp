@@ -12,7 +12,7 @@ FilteredSensorBase::FilteredSensorBase()
     : _initialized(false)
     , _lastError(ErrorCode::ERR_NONE)
     , _filter(MEDIAN_FILTER_SIZE, MOVING_AVG_WINDOW_SIZE)
-    , _filterEnabled(true)
+    , _filterEnabled(false)
     , _readCount(0)
     , _errorCount(0) {
     _calibrationOffset = 0;
@@ -24,10 +24,15 @@ FilteredSensorBase::FilteredSensorBase()
  */
 float FilteredSensorBase::readDistanceMm() {
     float raw = readRawDistanceMm();
-    if (raw < 0 || !_filterEnabled) {
+    if (raw < 0) {
         return raw;
     }
-    return _filter.filter(raw);
+    // Filter is optional; calibration trim is always applied after the raw sample.
+    float v = _filterEnabled ? _filter.filter(raw) : raw;
+    if (v < 0) {
+        return v;
+    }
+    return v + _calibrationOffset;
 }
 
 /**

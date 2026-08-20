@@ -55,7 +55,7 @@ flm:
     username: ${MQTT_USER_BRIDGE:flmServerAdmin}
     password: ${MQTT_PASS_BRIDGE:flmPass}
     tls-enabled: false
-    topic-filter: "+/water/#"
+    topic-filter: "+/+/#"
     qos: 1
     dynsec-admin-user: ${MQTT_DYNSEC_ADMIN:flmDynsecAdmin}
     dynsec-admin-password: ${MQTT_DYNSEC_PASS:flmDynsecPass}

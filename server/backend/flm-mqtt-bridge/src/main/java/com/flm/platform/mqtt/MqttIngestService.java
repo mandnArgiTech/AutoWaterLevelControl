@@ -2,7 +2,10 @@ package com.flm.platform.mqtt;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.flm.platform.mqtt.capability.CapabilityHandlerRegistry;
+import com.flm.platform.mqtt.telemetry.DeviceHealthDao;
 import com.flm.platform.mqtt.telemetry.DeviceIdCache;
+import com.flm.platform.mqtt.telemetry.PendingDeviceDao;
 import com.flm.platform.mqtt.telemetry.ReadingBatchWriter;
 import com.flm.platform.mqtt.telemetry.TelemetrySample;
 import org.eclipse.paho.client.mqttv3.*;
@@ -17,8 +20,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Subscribes to Mosquitto and enqueues typed telemetry samples for batch JDBC write.
- * Topic: {deviceTag}/{topicPrefix}/{subtopic}  e.g. tank2_34ea20/water/level
+ * Subscribes to Mosquitto and routes telemetry to capability handlers.
+ * Compatible topics:
+ *   {tag}/water/level|status
+ *   {tag}/system/announce|health
+ *   {tag}/{capabilityKey}/telemetry
  */
 @Service
 @EnableConfigurationProperties(MqttProperties.class)
@@ -31,6 +37,9 @@ public class MqttIngestService implements MqttCallbackExtended {
     private final MqttTopicActivityStore activityStore;
     private final DeviceIdCache deviceIdCache;
     private final ReadingBatchWriter batchWriter;
+    private final PendingDeviceDao pendingDeviceDao;
+    private final DeviceHealthDao deviceHealthDao;
+    private final CapabilityHandlerRegistry handlerRegistry;
     private MqttClient client;
 
     public MqttIngestService(
@@ -38,13 +47,19 @@ public class MqttIngestService implements MqttCallbackExtended {
         ObjectMapper objectMapper,
         MqttTopicActivityStore activityStore,
         DeviceIdCache deviceIdCache,
-        ReadingBatchWriter batchWriter
+        ReadingBatchWriter batchWriter,
+        PendingDeviceDao pendingDeviceDao,
+        DeviceHealthDao deviceHealthDao,
+        CapabilityHandlerRegistry handlerRegistry
     ) {
         this.props = props;
         this.objectMapper = objectMapper;
         this.activityStore = activityStore;
         this.deviceIdCache = deviceIdCache;
         this.batchWriter = batchWriter;
+        this.pendingDeviceDao = pendingDeviceDao;
+        this.deviceHealthDao = deviceHealthDao;
+        this.handlerRegistry = handlerRegistry;
     }
 
     @PostConstruct
@@ -125,17 +140,38 @@ public class MqttIngestService implements MqttCallbackExtended {
         if (parts.length < 3) return;
 
         String deviceTag = parts[0];
+        String segment = parts[1];
         String subtopic = parts[parts.length - 1];
 
         Optional<DeviceIdCache.CachedDevice> deviceOpt = deviceIdCache.lookup(deviceTag);
-        if (deviceOpt.isEmpty()) {
-            log.warn("Ignoring MQTT {} — deviceTag '{}' is not registered (POST /api/devices)",
-                subtopic, deviceTag);
+
+        if ("system".equals(segment) && "announce".equals(subtopic)) {
+            handleAnnounce(deviceTag, topic, payload);
             return;
         }
+
+        if (deviceOpt.isEmpty()) {
+            String chipId = null;
+            String modelKey = null;
+            try {
+                JsonNode root = objectMapper.readTree(payload);
+                chipId = text(root, "chipId", "chip_id");
+                modelKey = text(root, "model_key", "modelKey");
+            } catch (Exception ignored) {
+            }
+            pendingDeviceDao.record(deviceTag, chipId, modelKey, segment, topic, payload);
+            log.debug("Queued pending deviceTag='{}' subtopic={} (not registered)", deviceTag, subtopic);
+            return;
+        }
+
         UUID deviceId = deviceOpt.get().deviceId();
         Instant now = Instant.now();
         JsonNode root = objectMapper.readTree(payload);
+
+        if ("health".equals(subtopic) || ("system".equals(segment) && "health".equals(subtopic))) {
+            upsertHealth(deviceId, now, root);
+            return;
+        }
 
         if ("status".equals(subtopic)) {
             boolean online = root.path("online").asBoolean(false);
@@ -146,56 +182,81 @@ public class MqttIngestService implements MqttCallbackExtended {
                 null, null, null, null, null, null, null, null,
                 uptimeMs, rssi, online, false
             ));
+            upsertHealth(deviceId, now, root);
             return;
         }
 
-        if ("level".equals(subtopic)) {
-            JsonNode level = root.path("level");
-            JsonNode sensor = root.path("sensor");
-            JsonNode battery = root.path("battery");
-
-            Float pct = level.path("percentFilled").isNumber() ? (float) level.path("percentFilled").asDouble() : null;
-            Float vol = level.path("volumeLiters").isNumber() ? (float) level.path("volumeLiters").asDouble() : null;
-            Short waterMm = toShort(level, "waterHeightMm");
-            if (waterMm == null && level.path("waterHeightCm").isNumber()) {
-                waterMm = (short) Math.round(level.path("waterHeightCm").asDouble() * 10.0);
+        String capabilityKey = resolveCapability(segment, subtopic);
+        if (capabilityKey != null) {
+            var handler = handlerRegistry.find(capabilityKey);
+            if (handler.isPresent()) {
+                handler.get().handle(deviceId, deviceTag, now, root);
+            } else {
+                log.info("Unknown capability '{}' on topic {} — ignored", capabilityKey, topic);
             }
-            Short distMm = toShort(sensor, "distanceMm");
-            if (distMm == null && sensor.path("distanceCm").isNumber()) {
-                distMm = (short) Math.round(sensor.path("distanceCm").asDouble() * 10.0);
-            }
-            Float tempC = sensor.path("temperatureC").isNumber() ? (float) sensor.path("temperatureC").asDouble() : null;
-            Short humidity = sensor.path("humidityPct").isNumber() ? (short) sensor.path("humidityPct").asInt() : null;
-            Short battPct = battery.path("percent").isNumber() ? (short) battery.path("percent").asInt() : null;
-            Short battMv = null;
-            if (battery.path("voltage").isNumber()) {
-                battMv = (short) Math.round(battery.path("voltage").asDouble() * 1000.0);
-            } else if (battery.path("millivolts").isNumber()) {
-                battMv = (short) battery.path("millivolts").asInt();
-            }
-            Long uptimeMs = readUptimeMs(root);
-            Short rssi = root.path("rssi").isNumber() ? (short) root.path("rssi").asInt() : null;
-
-            batchWriter.enqueue(new TelemetrySample(
-                deviceId, now,
-                pct, vol, waterMm, distMm, tempC, humidity, battMv, battPct,
-                uptimeMs, rssi, true, true
-            ));
-            log.debug("Queued level for {} pct={}", deviceTag, pct);
         }
+    }
+
+    /**
+     * Map legacy and new topic shapes to a capability key.
+     * water/level → measure.water_level
+     * measure.env/telemetry → measure.env
+     */
+    static String resolveCapability(String segment, String subtopic) {
+        if ("level".equals(subtopic) && ("water".equals(segment) || "measure.water_level".equals(segment))) {
+            return "measure.water_level";
+        }
+        if ("telemetry".equals(subtopic) || "data".equals(subtopic)) {
+            if (segment.contains(".")) return segment;
+        }
+        if (segment.startsWith("measure.") || segment.startsWith("control.") || segment.startsWith("system.")) {
+            if ("telemetry".equals(subtopic) || "level".equals(subtopic) || segment.equals(subtopic)) {
+                return segment;
+            }
+        }
+        return null;
+    }
+
+    private void handleAnnounce(String deviceTag, String topic, String payload) throws Exception {
+        JsonNode root = objectMapper.readTree(payload);
+        String chipId = text(root, "chip_id", "chipId");
+        String modelKey = text(root, "model_key", "modelKey");
+        pendingDeviceDao.record(deviceTag, chipId, modelKey, "system", topic, payload);
+        log.info("Announce for deviceTag='{}' model={} chip={}", deviceTag, modelKey, chipId);
+    }
+
+    private void upsertHealth(UUID deviceId, Instant now, JsonNode root) {
+        Integer freeHeap = intOrNull(root, "freeHeap", "free_heap");
+        Integer minFree = intOrNull(root, "minFreeHeap", "min_free_heap");
+        Integer maxBlock = intOrNull(root, "maxFreeBlock", "max_free_block");
+        Short cpu = root.path("cpuPercent").isNumber() ? (short) root.path("cpuPercent").asInt()
+            : (root.path("cpu_percent").isNumber() ? (short) root.path("cpu_percent").asInt() : null);
+        Short rssi = root.path("rssi").isNumber() ? (short) root.path("rssi").asInt() : null;
+        String ip = text(root, "ip", "ip_address");
+        String mac = text(root, "mac", "mac_address");
+        Long uptimeMs = readUptimeMs(root);
+        String firmware = text(root, "firmware");
+        deviceHealthDao.upsert(deviceId, now, freeHeap, minFree, maxBlock, cpu, rssi, ip, mac, uptimeMs, firmware);
+    }
+
+    private static String text(JsonNode root, String... fields) {
+        for (String f : fields) {
+            if (root.path(f).isTextual()) return root.path(f).asText();
+        }
+        return null;
+    }
+
+    private static Integer intOrNull(JsonNode root, String... fields) {
+        for (String f : fields) {
+            if (root.path(f).isNumber()) return root.path(f).asInt();
+        }
+        return null;
     }
 
     private static Long readUptimeMs(JsonNode root) {
         if (root.path("uptimeMs").isNumber()) return root.path("uptimeMs").asLong();
         if (root.path("uptime").isNumber()) return root.path("uptime").asLong();
         return null;
-    }
-
-    private static Short toShort(JsonNode node, String field) {
-        if (node == null || !node.path(field).isNumber()) return null;
-        int v = node.path(field).asInt();
-        if (v < Short.MIN_VALUE || v > Short.MAX_VALUE) return null;
-        return (short) v;
     }
 
     public boolean isConnected() {

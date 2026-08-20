@@ -47,6 +47,7 @@ server/mosquitto/log/
 server/mosquitto/.dynsec-bootstrap/
 server/mosquitto/config/mosquitto-standalone.generated.conf
 server/postgres/
+server/backups/
 server/mosquitto/openssl/server.cnf
 server/frontend/node_modules/
 server/frontend/dist/
