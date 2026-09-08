@@ -9,6 +9,7 @@
 #include "MQTTManager.h"
 #include "../version.h"
 #include "../utils/HeapMonitor.h"
+#include "../utils/BootDiagnostics.h"
 #include "../utils/Log.h"
 #include "../utils/TimeManager.h"
 #include <LittleFS.h>
@@ -494,6 +495,10 @@ bool MQTTManager::publishStatus() {
     doc["freeHeap"] = HeapMonitor::freeHeap();
     doc["minFreeHeap"] = HeapMonitor::minFreeHeap();
     doc["maxFreeBlock"] = HeapMonitor::maxFreeBlock();
+    {
+        JsonObject reboot = doc["reboot"].to<JsonObject>();
+        BootDiagnostics::getInstance().fillStatus(reboot);
+    }
 
     String payload;
     serializeJson(doc, payload);

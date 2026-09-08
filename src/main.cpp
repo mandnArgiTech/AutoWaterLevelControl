@@ -18,6 +18,7 @@
 #include "utils/Log.h"
 #include "utils/FlmTime.h"
 #include "utils/HeapMonitor.h"
+#include "utils/BootDiagnostics.h"
 #include "utils/BatteryMonitor.h"
 #ifdef FLM_BATTERY_MONITOR
 #include "utils/adc_scaling.h"
@@ -96,6 +97,9 @@ void initializeSystem() {
 
     Serial.println(F("\n>>> Error Handler..."));
     ErrorHandler::getInstance().begin();
+
+    Serial.println(F("\n>>> Boot diagnostics..."));
+    BootDiagnostics::getInstance().begin();
 
     Serial.println(F("\n>>> Sensor..."));
     SensorConfig& sensorCfg = ConfigManager::getInstance().getSensorConfig();
@@ -241,6 +245,7 @@ void loop() {
 
 void processLoop() {
     HeapMonitor::sample();
+    BootDiagnostics::getInstance().loop();
 
     // Service HTTP first — ESP8266WebServer is single-client; delays here stall the UI.
     if (webServer) webServer->loop();
@@ -492,6 +497,7 @@ void handleMQTTMessage(const String& topic, const String& payload) {
         MQTTManager::getInstance().publishStatus();
     } else if (cmd == "restart") {
         Serial.println(F("[Main] Restarting..."));
+        BootDiagnostics::getInstance().markIntentionalRestart("mqtt_restart");
         delay(500);
         ESP.restart();
 #if defined(FLM_ROLE_MOTOR_RELAY) || defined(FLM_ROLE_MOTOR_SMS)

@@ -9,6 +9,7 @@
 #include "WiFiManager.h"
 #include "../version.h"
 #include "../utils/Log.h"
+#include "../utils/BootDiagnostics.h"
 
 // =============================================================================
 // SECTION 1: SINGLETON INSTANCE
@@ -258,6 +259,9 @@ void WiFiManager::setupOTA() {
         _otaInProgress = true;
         const char* type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
         FLM_LOG_INFO("OTA", "start %s", type);
+        // Mark early — esp8266 often reboots from the updater before onEnd runs.
+        BootDiagnostics::getInstance().markIntentionalRestart(
+            (ArduinoOTA.getCommand() == U_FLASH) ? "arduino_ota_firmware" : "arduino_ota_filesystem");
         if (_otaPrepareCallback) {
             _otaPrepareCallback();
         }
@@ -267,6 +271,7 @@ void WiFiManager::setupOTA() {
     ArduinoOTA.onEnd([this]() {
         _otaInProgress = false;
         FLM_LOG_INFO("OTA", "complete");
+        BootDiagnostics::getInstance().markIntentionalRestart("arduino_ota");
     });
     
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {

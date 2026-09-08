@@ -11,6 +11,7 @@
 8. [Error Codes](#error-codes)
 9. [OOM reboot loop after OTA](#oom-reboot-loop-after-ota)
 10. [OTA "No response from device"](#ota-no-response-from-device)
+11. [Why did the device reboot?](#why-did-the-device-reboot-crash-vs-power-vs-ota)
 
 ---
 
@@ -565,6 +566,34 @@ scripts/ota_preflight.sh <device-ip>           # checks only
 scripts/ota_preflight.sh <device-ip> upload    # firmware
 scripts/ota_preflight.sh <device-ip> uploadfs  # LittleFS
 ```
+
+---
+
+## Why did the device reboot? (crash vs power vs OTA)
+
+**Symptom:** Uptime resets (e.g. `1d 2h`) but nobody clicked Restart.
+
+**Where to look:** `GET http://<device-ip>/api/status` → object **`reboot`** (also on MQTT `{tag}/water/status`).
+
+| Field | Meaning |
+|--------|---------|
+| `category` | `POWER` / `WATCHDOG` / `CRASH` / `SOFTWARE` / `EXTERNAL` / `INTENTIONAL` / `SLEEP` |
+| `likelyCause` | Human summary of the best explanation |
+| `reason` / `reasonCode` | ESP8266 hardware reset reason |
+| `intentional` / `intentNote` | True if firmware marked restart (web/API/MQTT/OTA) before reboot |
+| `exceptionCause` / `epc1` | Present on `CRASH` — CPU exception details |
+| `previousUptime` / `previousMinFreeHeap` | Last session before this boot (from 60s heartbeat on LittleFS) |
+| `previousBatteryV` | If battery monitor build — low value + `POWER` ⇒ brownout clue |
+| `bootCount` | How many times the node has booted (LittleFS counter) |
+
+**How to read it:**
+
+- `POWER` → supply removed/restored or hard brownout-style cold boot  
+- `WATCHDOG` / `CRASH` → firmware hang or panic (check `previousMinFreeHeap` for OOM)  
+- `INTENTIONAL` + `web_ota` / `arduino_ota` / `api_restart` → expected update/restart  
+- `EXTERNAL` → reset button / EXT_RST line glitch  
+
+Serial at boot also prints `[Boot] reset #… category=…`.
 
 ---
 

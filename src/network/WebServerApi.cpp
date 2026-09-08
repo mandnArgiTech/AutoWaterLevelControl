@@ -8,6 +8,7 @@
 #include "MQTTManager.h"
 #include "../utils/TimeManager.h"
 #include "../utils/HeapMonitor.h"
+#include "../utils/BootDiagnostics.h"
 #include "../version.h"
 #include <LittleFS.h>
 #ifdef FLM_BATTERY_MONITOR
@@ -27,6 +28,10 @@ void WebServerManager::handleApiStatus() {
     doc["freeHeap"] = HeapMonitor::freeHeap();
     doc["minFreeHeap"] = HeapMonitor::minFreeHeap();
     doc["maxFreeBlock"] = HeapMonitor::maxFreeBlock();
+    {
+        JsonObject reboot = doc["reboot"].to<JsonObject>();
+        BootDiagnostics::getInstance().fillStatus(reboot);
+    }
 
     const WaterLevel& level = _calculator.getLastLevel();
     doc["sensorOk"] = level.sensorOk;
@@ -321,6 +326,7 @@ void WebServerManager::handleApiErrorsClear() {
 void WebServerManager::handleApiRestart() {
     _requestCount++;
     addCorsHeaders();
+    BootDiagnostics::getInstance().markIntentionalRestart("api_restart");
     sendSuccess("Restarting device...");
     delay(500);
     ESP.restart();
@@ -339,6 +345,7 @@ void WebServerManager::handleApiReset() {
     ConfigManager::getInstance().unlockConfigWrite();
 
     sendSuccess("Factory reset complete. Restarting...");
+    BootDiagnostics::getInstance().markIntentionalRestart("factory_reset");
     delay(500);
     ESP.restart();
 }

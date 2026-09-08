@@ -5,6 +5,7 @@
 #include "WebServer.h"
 #include <Updater.h>
 #include "../utils/Log.h"
+#include "../utils/BootDiagnostics.h"
 
 void WebServerManager::handleFirmwareUpload() {
     HTTPUpload& upload = _server.upload();
@@ -46,6 +47,7 @@ void WebServerManager::handleFirmwareUploadComplete() {
     addCorsHeaders();
     if (_firmwareUploadOk) {
         _server.send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting\"}");
+        BootDiagnostics::getInstance().markIntentionalRestart("web_ota");
         delay(50);
         ESP.restart();
     } else {
